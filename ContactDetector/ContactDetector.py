@@ -14,8 +14,10 @@ from slicer.parameterNodeWrapper import (
     WithinRange,
 )
 
-from slicer import vtkMRMLScalarVolumeNode
+from slicer import vtkMRMLScalarVolumeNode, vtkMRMLSegmentationNode, vtkMRMLMarkupsFiducialNode
 
+from typing import List
+import numpy as np
 
 #
 # ContactDetector
@@ -29,11 +31,11 @@ class ContactDetector(ScriptedLoadableModule):
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        self.parent.title = _("ContactDetector")  # TODO: make this more human readable by adding spaces
+        self.parent.title = _("Contact Detector")  # TODO: make this more human readable by adding spaces
         # TODO: set categories (folders where the module shows up in the module selector)
-        self.parent.categories = [translate("qSlicerAbstractCoreModule", "Examples")]
+        self.parent.categories = [translate("qSlicerAbstractCoreModule", "SEEG")]
         self.parent.dependencies = []  # TODO: add here list of module names that this module requires
-        self.parent.contributors = ["John Doe (AnyWare Corp.)"]  # TODO: replace with "Firstname Lastname (Organization)"
+        self.parent.contributors = ["Jakub Smid (CTU in Prague)"]  # TODO: replace with "Firstname Lastname (Organization)"
         # TODO: update with short description of the module and a link to online module documentation
         # _() function marks text as translatable to other languages
         self.parent.helpText = _("""
@@ -47,7 +49,7 @@ and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR0132
 """)
 
         # Additional initialization step after application startup is complete
-        slicer.app.connect("startupCompleted()", registerSampleData)
+        # slicer.app.connect("startupCompleted()", registerSampleData)
 
 
 #
@@ -122,7 +124,22 @@ class ContactDetectorParameterNode:
     invertThreshold: bool = False
     thresholdedVolume: vtkMRMLScalarVolumeNode
     invertedVolume: vtkMRMLScalarVolumeNode
+    inputCT: vtkMRMLScalarVolumeNode
+    brainMask: vtkMRMLScalarVolumeNode
+    screwFiducials: vtkMRMLMarkupsFiducialNode
 
+
+class Electrode():
+    def __init__(self, screw_tip_ras, label, ):
+        self.screw_tip_ras = np.array(screw_tip_ras)
+        self.label = label
+        self.label_prefix, self.contacts = Electrode.split_label(label)
+        self.length_mm = 2*self.contacts + 1.5 * (self.contacts - 1)
+    
+    @staticmethod
+    def split_label(electrode_name):
+        split = electrode_name.split("-")
+        return split[0], int(split[1])
 
 #
 # ContactDetectorWidget
@@ -137,7 +154,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def __init__(self, parent=None) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
         ScriptedLoadableModuleWidget.__init__(self, parent)
-        VTKObservationMixin.__init__(self)  # needed for parameter node observation
+        # VTKObservationMixin.__init__(self)  # needed for parameter node observation
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
@@ -164,14 +181,25 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Connections
 
         # These connections ensure that we update parameter node when scene is closed
-        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
-        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+        # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
+        # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
 
         # Buttons
-        self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
+        # self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
+        self.ui.buttonScrewDetection.connect("clicked(bool)", self.onScrewDetectionButton)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
+
+    def onScrewDetectionButton(self):
+        print("onScrewDetectionButton")
+        
+        # load electrodes
+        self.electrodes: List[Electrode] = []
+        for i in range(self._parameterNode.screwFiducials.GetNumberOfFiducials()):
+            screw_tip_ras = [0, 0, 0]
+            self._parameterNode.screwFiducials.GetNthControlPointPosition(i, screw_tip_ras)
+            self.electrodes.append(Electrode(screw_tip_ras, self._parameterNode.screwFiducials.GetNthControlPointLabel(i)))
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -188,7 +216,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
             self._parameterNodeGuiTag = None
-            self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+            # self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
 
     def onSceneStartClose(self, caller, event) -> None:
         """Called just before the scene is closed."""
@@ -209,10 +237,10 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.setParameterNode(self.logic.getParameterNode())
 
         # Select default input nodes if nothing is selected yet to save a few clicks for the user
-        if not self._parameterNode.inputVolume:
-            firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
-            if firstVolumeNode:
-                self._parameterNode.inputVolume = firstVolumeNode
+        # if not self._parameterNode.inputVolume:
+        #     firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
+        #     if firstVolumeNode:
+        #         self._parameterNode.inputVolume = firstVolumeNode
 
     def setParameterNode(self, inputParameterNode: Optional[ContactDetectorParameterNode]) -> None:
         """
@@ -222,22 +250,22 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         if self._parameterNode:
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
-            self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+            # self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
         self._parameterNode = inputParameterNode
         if self._parameterNode:
             # Note: in the .ui file, a Qt dynamic property called "SlicerParameterName" is set on each
             # ui element that needs connection.
             self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
-            self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
-            self._checkCanApply()
+            # self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+            # self._checkCanApply()
 
-    def _checkCanApply(self, caller=None, event=None) -> None:
-        if self._parameterNode and self._parameterNode.inputVolume and self._parameterNode.thresholdedVolume:
-            self.ui.applyButton.toolTip = _("Compute output volume")
-            self.ui.applyButton.enabled = True
-        else:
-            self.ui.applyButton.toolTip = _("Select input and output volume nodes")
-            self.ui.applyButton.enabled = False
+    # def _checkCanApply(self, caller=None, event=None) -> None:
+    #     if self._parameterNode and self._parameterNode.inputVolume and self._parameterNode.thresholdedVolume:
+    #         self.ui.applyButton.toolTip = _("Compute output volume")
+    #         self.ui.applyButton.enabled = True
+    #     else:
+    #         self.ui.applyButton.toolTip = _("Select input and output volume nodes")
+    #         self.ui.applyButton.enabled = False
 
     def onApplyButton(self) -> None:
         """Run processing when user clicks "Apply" button."""
@@ -274,6 +302,21 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
     def getParameterNode(self):
         return ContactDetectorParameterNode(super().getParameterNode())
+    
+    def detectScrew(self,
+                    inputCT: vtkMRMLScalarVolumeNode,
+                    inputBrainMask: vtkMRMLSegmentationNode,
+                    screwSegmentation: vtkMRMLSegmentationNode) -> None:
+        pass
+
+    def RAS_to_IJK(self,
+                 point_RAS: np.array,
+                 volumeNode: vtkMRMLScalarVolumeNode) -> np.array:
+        volumeRasToIjk = vtk.vtkMatrix4x4()
+        volumeNode.GetRASToIJKMatrix(volumeRasToIjk)
+        point_Ijk = [0, 0, 0, 1]
+        volumeRasToIjk.MultiplyPoint(np.append(point_RAS,1.0), point_Ijk)
+        return np.array(point_Ijk[0:3])
 
     def process(self,
                 inputVolume: vtkMRMLScalarVolumeNode,
