@@ -330,9 +330,24 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         progressbar.setCancelButton(None)
         slicer.app.processEvents()
 
+        # precompute gaussian ball
+        sigma_mm = 0.8
+        sigma_ijk = sigma_mm / np.array(inputCT.GetSpacing())[::-1]
+        ball_shape = (3 * sigma_ijk).astype(int) # shape of 3 sigma
+        
+        # ensure odd shape
+        if ball_shape[0] % 2 == 0:
+            ball_shape[0] += 1
+        if ball_shape[1] % 2 == 0:
+            ball_shape[1] += 1
+        if ball_shape[2] % 2 == 0:
+            ball_shape[2] += 1
+
+        ball_radius = ball_shape // 2
+        gaussian_ball = self.gaussian_ball(ball_shape, sigma_ijk)
+
         for electrode in electrodes:
             electrode_points = np.array(np.nonzero(labels_volume == electrode.gmm_label)).T
-            print(f"electrode {electrode.label_prefix} first point {electrode_points[0]}\n")
             
             # find the direction of the maximum variance
             pca = PCA(n_components=1)
@@ -380,19 +395,50 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
                 # generate gaussian balls
                 for point in selected_points:
-                    gaussian_balls_volume += self.gaussian_ball(gaussian_balls_volume.shape, np.array(inputCT.GetSpacing())[::-1], point, 0.8)
+                    # add precomputed ball to particular location
+                    min_voxel = np.round(point - ball_radius).astype(int)
+                    max_voxel = np.round(point + ball_radius + 1).astype(int)
+
+                    # clip to image boundaries
+                    min_vol = np.maximum(min_voxel, 0)
+                    max_vol = np.minimum(max_voxel, gaussian_balls_volume.shape)
+
+                    mask_start = min_vol - min_voxel
+                    mask_end = max_vol - min_voxel
+
+                    gaussian_balls_volume[
+                        min_vol[0]:max_vol[0],
+                        min_vol[1]:max_vol[1],
+                        min_vol[2]:max_vol[2]] += gaussian_ball[mask_start[0]:mask_end[0],
+                                                                mask_start[1]:mask_end[1],
+                                                                mask_start[2]:mask_end[2]]
 
                 # compute correlation
-                correlation = np.corrcoef(gaussian_balls_volume.flatten(), labels_volume.flatten())[0, 1]
+                correlation = np.corrcoef(gaussian_balls_volume.flatten(), slicer.util.arrayFromVolume(inputCT).flatten())[0, 1]
                 if correlation > best_fit:
                     best_fit = correlation
                     points_best_fit = selected_points
-            print(f"electrode {electrode.label_prefix}: best fit {best_fit}")
-            print(f"points_best_fit: {points_best_fit}\n")
 
+            # save volume with blobs
             gaussian_balls_volume = np.zeros(labels_volume.shape)
             for point in points_best_fit:
-                gaussian_balls_volume += self.gaussian_ball(gaussian_balls_volume.shape, np.array(inputCT.GetSpacing())[::-1], point, 0.8)
+                    # add precomputed ball to particular location
+                    min_voxel = np.round(point - ball_radius).astype(int)
+                    max_voxel = np.round(point + ball_radius + 1).astype(int)
+
+                    # clip to image boundaries
+                    min_vol = np.maximum(min_voxel, 0)
+                    max_vol = np.minimum(max_voxel, gaussian_balls_volume.shape)
+
+                    mask_start = min_vol - min_voxel
+                    mask_end = max_vol - min_voxel
+
+                    gaussian_balls_volume[
+                        min_vol[0]:max_vol[0],
+                        min_vol[1]:max_vol[1],
+                        min_vol[2]:max_vol[2]] += gaussian_ball[mask_start[0]:mask_end[0],
+                                                                mask_start[1]:mask_end[1],
+                                                                mask_start[2]:mask_end[2]]
             gaussNode = slicer.modules.volumes.logic().CloneVolume(inputCT, f"Gaussian balls {electrode.label_prefix}")
             slicer.util.updateVolumeFromArray(gaussNode, gaussian_balls_volume)
 
@@ -594,11 +640,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
     def gaussian_ball(self,
                       shape: np.array,
-                      spacing: np.array,
-                      center: np.array,
-                      sigma: float) -> np.array:
+                      sigma_ijk: np.array) -> np.array:
         x, y, z = np.indices(shape)
-        sigma_ijk = sigma / spacing
+        center = shape // 2
         
         gauss = np.exp(
             -((x - center[0])**2 / (2 * sigma_ijk[0]**2)
