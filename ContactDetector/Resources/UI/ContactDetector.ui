@@ -311,6 +311,13 @@
     </widget>
    </item>
    <item>
+    <widget class="QPushButton" name="buttonCurveFitting">
+     <property name="text">
+      <string>Curve fitting</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>

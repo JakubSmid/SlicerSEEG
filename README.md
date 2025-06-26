@@ -1,0 +1,5 @@
+- resize progress bars and add labels
+- fix memory leakage after deleting nodes from slicer
+- check algorithm on non standard spacing
+- skull stripping and reshape
+- debug checkbox to enable visualization
