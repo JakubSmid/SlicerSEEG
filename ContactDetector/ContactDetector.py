@@ -165,6 +165,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
+        self.electrode_labels_volume_array = None
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -330,6 +331,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         progressbar.setCancelButton(None)
         slicer.app.processEvents()
 
+        ct_array = slicer.util.arrayFromVolume(inputCT)
+
         # precompute gaussian ball
         sigma_mm = 0.8
         sigma_ijk = sigma_mm / np.array(inputCT.GetSpacing())[::-1]
@@ -346,6 +349,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         ball_radius = ball_shape // 2
         gaussian_ball = self.gaussian_ball(ball_shape, sigma_ijk)
 
+        markupsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
+        markupsNode.SetName("ElectrodesSmid")
         for electrode in electrodes:
             electrode_points = np.array(np.nonzero(labels_volume == electrode.gmm_label)).T
             
@@ -362,10 +367,13 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             # project the electrode points to the direction of the maximum variance
             s = (electrode_points - pca_centroid_ijk) @ pca_v_ijk
 
+            # prepare weights
+            intensities = ct_array[electrode_points[:, 0], electrode_points[:, 1], electrode_points[:, 2]]
+
             # fit a 5th order polynomial
-            coeffs_x = np.polyfit(s, electrode_points[:, 0], 5)
-            coeffs_y = np.polyfit(s, electrode_points[:, 1], 5)
-            coeffs_z = np.polyfit(s, electrode_points[:, 2], 5)
+            coeffs_x = np.polyfit(s, electrode_points[:, 0], 5, w=intensities)
+            coeffs_y = np.polyfit(s, electrode_points[:, 1], 5, w=intensities)
+            coeffs_z = np.polyfit(s, electrode_points[:, 2], 5, w=intensities)
 
             X = np.linspace(s.min(), s.max(), np.ceil((electrode.length_mm + 20) / 0.1).astype(int)) # electrode.length_mm + sphere around bolt (20 mm)
             x_fit = np.polyval(coeffs_x, X)
@@ -388,7 +396,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             for offset in range(n):
                 progressbar.setValue((offset+1) / n * 100)
                 slicer.app.processEvents()
-                
+
                 # select points from the fitted curve
                 selected_points = self.select_contact_points(points_list, distances_list, offset, electrode.n_contacts)
                 gaussian_balls_volume = np.zeros(labels_volume.shape)
@@ -413,38 +421,31 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                                                                 mask_start[1]:mask_end[1],
                                                                 mask_start[2]:mask_end[2]]
 
+                # bounding box
+                bbox_min = np.maximum(np.floor(selected_points.min(axis=0) - ball_radius), 0).astype(int)
+                bbox_max = np.minimum(np.ceil(selected_points.max(axis=0) + ball_radius + 1), gaussian_balls_volume.shape).astype(int)
+
+                # crop region
+                gbv_crop = gaussian_balls_volume[bbox_min[0]:bbox_max[0],
+                                                bbox_min[1]:bbox_max[1],
+                                                bbox_min[2]:bbox_max[2]]
+
+                ct_crop = ct_array[bbox_min[0]:bbox_max[0],
+                                bbox_min[1]:bbox_max[1],
+                                bbox_min[2]:bbox_max[2]]
+
                 # compute correlation
-                correlation = np.corrcoef(gaussian_balls_volume.flatten(), slicer.util.arrayFromVolume(inputCT).flatten())[0, 1]
+                mask = gbv_crop != 0
+                correlation = np.corrcoef(gbv_crop[mask], ct_crop[mask])[0, 1]
+
                 if correlation > best_fit:
                     best_fit = correlation
                     points_best_fit = selected_points
 
-            # save volume with blobs
-            gaussian_balls_volume = np.zeros(labels_volume.shape)
-            for point in points_best_fit:
-                    # add precomputed ball to particular location
-                    min_voxel = np.round(point - ball_radius).astype(int)
-                    max_voxel = np.round(point + ball_radius + 1).astype(int)
-
-                    # clip to image boundaries
-                    min_vol = np.maximum(min_voxel, 0)
-                    max_vol = np.minimum(max_voxel, gaussian_balls_volume.shape)
-
-                    mask_start = min_vol - min_voxel
-                    mask_end = max_vol - min_voxel
-
-                    gaussian_balls_volume[
-                        min_vol[0]:max_vol[0],
-                        min_vol[1]:max_vol[1],
-                        min_vol[2]:max_vol[2]] += gaussian_ball[mask_start[0]:mask_end[0],
-                                                                mask_start[1]:mask_end[1],
-                                                                mask_start[2]:mask_end[2]]
-            gaussNode = slicer.modules.volumes.logic().CloneVolume(inputCT, f"Gaussian balls {electrode.label_prefix}")
-            slicer.util.updateVolumeFromArray(gaussNode, gaussian_balls_volume)
-
             # plot selected points
             for i, point in enumerate(points_best_fit):
                 points_best_fit[i] = self.IJK_to_RAS(point[::-1], inputCT)
+                # markupsNode.AddControlPoint(points_best_fit[i], f"{electrode.label_prefix}{i+1}")
 
             curveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
             slicer.util.updateMarkupsControlPointsFromArray(curveNode, points_best_fit)
@@ -657,24 +658,12 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                               distances: np.array,
                               n_offset: int,
                               n_contacts: int) -> np.array:
-        contacts = [points[n_offset]]
+        cumulative = np.cumsum(distances[n_offset:])
+        target_distances = np.arange(n_contacts) * 3.5
 
-        distance = 0
-        last_point = n_offset
-        for i in range(last_point, len(distances)):
-            distance += distances[i] # cumulative sum between points
+        contacts = points[n_offset + np.searchsorted(cumulative, target_distances)]
 
-            # add contact if distance is 3.5 mm
-            if distance >= 3.5:
-                contacts.append(points[i+1])
-                distance = 0
-                last_point = i+1
-
-                # break if we have all contacts
-                if len(contacts) == n_contacts:
-                    break
-
-        return np.array(contacts)
+        return contacts
 
     def create_spherical_mask(self,
                               spacing: np.array,
