@@ -277,6 +277,89 @@
     </widget>
    </item>
    <item>
+    <layout class="QGridLayout" name="gridLayout" columnstretch="1,0">
+     <item row="2" column="0">
+      <widget class="QPushButton" name="buttonElectrodeSegmentation">
+       <property name="text">
+        <string>Electrode segmentation (GMM)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QCheckBox" name="checkBoxLinearApproximation">
+       <property name="text">
+        <string>Show linear approximation</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="QPushButton" name="buttonCurveFitting">
+       <property name="text">
+        <string>Curve fitting</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QCheckBox" name="checkBoxBoltSegmentation">
+       <property name="text">
+        <string>Show bolt segmentation</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QCheckBox" name="checkBoxElectrodeSegmentation">
+       <property name="text">
+        <string>Show electrode segmentation</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QPushButton" name="buttonBoltAxisEst">
+       <property name="text">
+        <string>Bolt axis estimation</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="0">
+      <widget class="QPushButton" name="buttonBoltSegmentation">
+       <property name="text">
+        <string>Bolt segmentation</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <item>
+        <widget class="QRadioButton" name="radioButtonFiducials">
+         <property name="tabletTracking">
+          <bool>false</bool>
+         </property>
+         <property name="text">
+          <string>Fiducials</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
+         </property>
+         <attribute name="buttonGroup">
+          <string notr="true">buttonGroup</string>
+         </attribute>
+        </widget>
+       </item>
+       <item>
+        <widget class="QRadioButton" name="radioButton">
+         <property name="text">
+          <string>Curve</string>
+         </property>
+         <attribute name="buttonGroup">
+          <string notr="true">buttonGroup</string>
+         </attribute>
+        </widget>
+       </item>
+      </layout>
+     </item>
+    </layout>
+   </item>
+   <item>
     <widget class="QPushButton" name="applyButton">
      <property name="enabled">
       <bool>false</bool>
@@ -286,34 +369,6 @@
      </property>
      <property name="text">
       <string>Apply</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QPushButton" name="buttonBoltSegmentation">
-     <property name="text">
-      <string>Bolt segmentation</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QPushButton" name="buttonBoltAxisEst">
-     <property name="text">
-      <string>Bolt axis estimation</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QPushButton" name="buttonElectrodeSegmentation">
-     <property name="text">
-      <string>Electrode segmentation (GMM)</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QPushButton" name="buttonCurveFitting">
-     <property name="text">
-      <string>Curve fitting</string>
      </property>
     </widget>
    </item>
@@ -455,4 +510,7 @@
    </hints>
   </connection>
  </connections>
+ <buttongroups>
+  <buttongroup name="buttonGroup"/>
+ </buttongroups>
 </ui>
