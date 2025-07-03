@@ -138,10 +138,11 @@ class Electrode():
         self.label_prefix, self.n_contacts = Electrode.split_label(label)
         self.length_mm = 2*self.n_contacts + 1.5 * (self.n_contacts - 1)
         
-        self.bolt_mask_array = None
+        self.bolt_segmentation_indices_ijk = None
+
         self.tip_ijk = None
         self.entry_point_ijk = None
-        self.gmm_label = None
+        self.gmm_segmentation_indices_ijk = None
     
     @staticmethod
     def split_label(electrode_name):
@@ -165,7 +166,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
-        self.electrode_labels_volume_array = None
+
+        self.electrodes: list[Electrode] = []
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -204,19 +206,22 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def onCurveFittingButton(self):
         fiducials = self.ui.radioButtonFiducials.isChecked()
-        self.logic.curve_fitting(self._parameterNode.inputCT, self.electrode_labels_volume_array, self.electrodes, fiducials)
+        with slicer.util.WaitCursor():
+            self.logic.curve_fitting(self._parameterNode.inputCT, self.electrodes, fiducials)
 
     def onElectrodeSegmentationButton(self):
         add_segmentation = self.ui.checkBoxElectrodeSegmentation.isChecked()
-        self.electrode_labels_volume_array = self.logic.eletrode_segmentation(self._parameterNode.inputCT, self._parameterNode.brainMask, self.electrodes, add_segmentation)
+        with slicer.util.WaitCursor():
+            self.logic.eletrode_segmentation(self._parameterNode.inputCT, self._parameterNode.brainMask, self.electrodes, add_segmentation)
 
     def onBoltAxisEstButton(self):
         add_line = self.ui.checkBoxLinearApproximation.isChecked()
-        self.logic.bolt_axis_estimation(self._parameterNode.inputCT, self.electrodes, add_line)
+        with slicer.util.WaitCursor():
+            self.logic.bolt_axis_estimation(self._parameterNode.inputCT, self.electrodes, add_line)
 
     def onBoltSegmentationButton(self):
         # load electrodes
-        self.electrodes: list[Electrode] = []
+        self.electrodes = []
         for i in range(self._parameterNode.boltFiducials.GetNumberOfControlPoints()):
             bolt_tip_ras = [0, 0, 0]
             self._parameterNode.boltFiducials.GetNthControlPointPosition(i, bolt_tip_ras)
@@ -224,7 +229,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # segment bolts
         add_segmentation = self.ui.checkBoxBoltSegmentation.isChecked()
-        self.logic.bolt_segmentation(self._parameterNode.inputCT, self.electrodes, add_segmentation)
+        with slicer.util.WaitCursor():
+            self.logic.bolt_segmentation(self._parameterNode.inputCT, self.electrodes, add_segmentation)
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -330,13 +336,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
     
     def curve_fitting(self,
             inputCT: vtkMRMLScalarVolumeNode,
-            labels_volume: np.ndarray,
             electrodes: list[Electrode],
             fiducials: bool = False):
-        progressbar = slicer.util.createProgressDialog()
-        progressbar.setCancelButton(None)
-        slicer.app.processEvents()
-
+        # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
         # precompute gaussian ball
@@ -357,14 +359,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
         if fiducials:
             markupsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-            markupsNode.SetName("ElectrodesSmid")
+            markupsNode.SetName("Electrodes")
         
         for electrode in electrodes:
-            electrode_points = np.array(np.nonzero(labels_volume == electrode.gmm_label)).T
+            slicer.app.processEvents()
             
             # find the direction of the maximum variance
             pca = PCA(n_components=1)
-            pca.fit(electrode_points)
+            pca.fit(electrode.gmm_segmentation_indices_ijk)
             pca_v_ijk = pca.components_[0]
             pca_centroid_ijk = pca.mean_
 
@@ -373,15 +375,15 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 pca_v_ijk = -pca_v_ijk
 
             # project the electrode points to the direction of the maximum variance
-            s = (electrode_points - pca_centroid_ijk) @ pca_v_ijk
+            s = (electrode.gmm_segmentation_indices_ijk - pca_centroid_ijk) @ pca_v_ijk
 
             # prepare weights
-            intensities = ct_array[electrode_points[:, 0], electrode_points[:, 1], electrode_points[:, 2]]
+            intensities = ct_array[electrode.gmm_segmentation_indices_ijk[:, 0], electrode.gmm_segmentation_indices_ijk[:, 1], electrode.gmm_segmentation_indices_ijk[:, 2]]
 
             # fit a 5th order polynomial
-            coeffs_x = np.polyfit(s, electrode_points[:, 0], 5, w=intensities)
-            coeffs_y = np.polyfit(s, electrode_points[:, 1], 5, w=intensities)
-            coeffs_z = np.polyfit(s, electrode_points[:, 2], 5, w=intensities)
+            coeffs_x = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 0], 5, w=intensities)
+            coeffs_y = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 1], 5, w=intensities)
+            coeffs_z = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 2], 5, w=intensities)
 
             X = np.linspace(s.min(), s.max(), np.ceil((electrode.length_mm + 20) / 0.1).astype(int)) # electrode.length_mm + sphere around bolt (20 mm)
             x_fit = np.polyval(coeffs_x, X)
@@ -402,12 +404,11 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             points_best_fit = None
             best_fit = 0
             for offset in range(n):
-                progressbar.setValue((offset+1) / n * 100)
                 slicer.app.processEvents()
 
                 # select points from the fitted curve
                 selected_points = self.select_contact_points(points_list, distances_list, offset, electrode.n_contacts)
-                gaussian_balls_volume = np.zeros(labels_volume.shape)
+                gaussian_balls_volume = np.zeros(ct_array.shape)
 
                 # generate gaussian balls
                 for point in selected_points:
@@ -435,12 +436,12 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
                 # crop region
                 gbv_crop = gaussian_balls_volume[bbox_min[0]:bbox_max[0],
-                                                bbox_min[1]:bbox_max[1],
-                                                bbox_min[2]:bbox_max[2]]
+                                                 bbox_min[1]:bbox_max[1],
+                                                 bbox_min[2]:bbox_max[2]]
 
                 ct_crop = ct_array[bbox_min[0]:bbox_max[0],
-                                bbox_min[1]:bbox_max[1],
-                                bbox_min[2]:bbox_max[2]]
+                                   bbox_min[1]:bbox_max[1],
+                                   bbox_min[2]:bbox_max[2]]
 
                 # compute correlation
                 mask = gbv_crop != 0
@@ -462,17 +463,12 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 curveNode.SetName(f"Electrode {electrode.label_prefix} curve")
 
     def eletrode_segmentation(self,
-            inputCT: vtkMRMLScalarVolumeNode,
-            brainMask: vtkMRMLSegmentationNode,
-            electrodes: list[Electrode],
-            add_segmentation: bool):
-        progressbar = slicer.util.createProgressDialog()
-        progressbar.setCancelButton(None)
-        slicer.app.processEvents()
-
-        # threshold
-        volume_array = slicer.util.arrayFromVolume(inputCT).copy()
-        volume_array[volume_array < 3000] = 0
+                              inputCT: vtkMRMLScalarVolumeNode, 
+                              brainMask: vtkMRMLSegmentationNode,
+                              electrodes: list[Electrode],
+                              add_segmentation: bool):
+        # prepare copy of the data array
+        ct_array = slicer.util.arrayFromVolume(inputCT).copy()
 
         # get brain mask
         brain_mask_labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode") # convert segmentation to labelmap
@@ -480,17 +476,20 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         brain_mask_array = slicer.util.arrayFromVolume(brain_mask_labelmap)
         slicer.mrmlScene.RemoveNode(brain_mask_labelmap)
 
-        # apply brain mask
-        volume_array[brain_mask_array == 0] = 0
+        # apply brain mask and threshold
+        ct_array[(brain_mask_array == 0) | (ct_array < 3000)] = 0
 
         # include bolt area
         for electrode in electrodes:
-            volume_array[electrode.bolt_mask_array == 1] = slicer.util.arrayFromVolume(inputCT)[electrode.bolt_mask_array == 1]
+            slicer.app.processEvents()
+            i,j,k = electrode.bolt_mask_indices_ijk.T
+            ct_array[i,j,k] = slicer.util.arrayFromVolume(inputCT)[i,j,k]
 
         # prepare GMM
         midpoints = []
         covariances = []
         for electrode in electrodes:
+            slicer.app.processEvents()
             midpoint = (electrode.tip_ijk + electrode.entry_point_ijk) / 2
             midpoints.append(midpoint)
             
@@ -505,15 +504,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                               means_init=np.array(midpoints),
                               precisions_init=np.array(covariances),
                               weights_init=np.full(len(electrodes), 1/len(electrodes)))
-        
-        points = np.array(np.nonzero(volume_array)).T
+
+        points = np.array(np.nonzero(ct_array)).T
         gmm.fit(points)
         labels = gmm.predict(points)
-
-        # create a label volume
-        labels_volume_array = np.ones_like(volume_array, dtype=np.int8) * -1
-        x, y, z = points[:, 0], points[:, 1], points[:, 2]
-        labels_volume_array[x, y, z] = labels
         
         if add_segmentation:
             segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
@@ -521,49 +515,47 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
        
         # assign gmm labels
         for i, electrode in enumerate(electrodes):
-            progressbar.setValue((i+1) / len(electrodes) * 100)
             slicer.app.processEvents()
-
-            i,j,k = np.round(electrode.entry_point_ijk).astype(int)
-            electrode.gmm_label = labels_volume_array[i,j,k]
-            gmm_volume_array = (labels_volume_array == electrode.gmm_label).astype(np.int8)
+            electrode.gmm_segmentation_indices_ijk = points[labels == i]
             
             if add_segmentation:
-                label_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-                slicer.util.updateVolumeFromArray(label_node, gmm_volume_array)
+                # prepare array with electrode segmentation
+                gmm_volume_array = np.zeros_like(ct_array, dtype=np.int8)
+                i,j,k = electrode.gmm_segmentation_indices_ijk.T
+                gmm_volume_array[i,j,k] = 1
+
+                # add nodes
+                labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+                slicer.util.updateVolumeFromArray(labelNode, gmm_volume_array)
 
                 ijkToRas = vtk.vtkMatrix4x4()
                 inputCT.GetIJKToRASMatrix(ijkToRas)
-                label_node.SetIJKToRASMatrix(ijkToRas)
-                label_node.SetOrigin(inputCT.GetOrigin())
+                labelNode.SetIJKToRASMatrix(ijkToRas)
+                labelNode.SetOrigin(inputCT.GetOrigin())
 
-                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(label_node, segmentationNode)
+                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelNode, segmentationNode)
                 seg_id = segmentationNode.GetSegmentation().GetSegmentIDs()[-1]
                 segmentationNode.GetSegmentation().GetSegment(seg_id).SetName(f"Electrode {electrode.label_prefix}")
-                slicer.mrmlScene.RemoveNode(label_node)
-        return labels_volume_array
+                slicer.mrmlScene.RemoveNode(labelNode)
 
     def bolt_axis_estimation(self,
                              inputCT: vtkMRMLScalarVolumeNode,
                              electrodes: list[Electrode],
                              add_line: bool) -> None:
-        progressbar = slicer.util.createProgressDialog()
-        progressbar.setCancelButton(None)
-        slicer.app.processEvents()
+        # prepare data array
+        ct_array = slicer.util.arrayFromVolume(inputCT)
 
-        for i, electrode in enumerate(electrodes):
-            progressbar.setValue((i+1) / len(electrodes) * 100)
+        for electrode in electrodes:
             slicer.app.processEvents()
-
+            
             # find the best fit line for the electrode
             pca = PCA(n_components=1)
-            points = np.array(np.nonzero(electrode.bolt_mask_array)).T
-            pca.fit(points)
+            pca.fit(electrode.bolt_mask_indices_ijk)
             pca_v_ijk = pca.components_[0]
             pca_centroid_ijk = pca.mean_
 
             # check pca_v_ijk direction is pointing inside the skull
-            ct_image_center_ijk = np.array(electrode.bolt_mask_array.shape) / 2
+            ct_image_center_ijk = np.array(ct_array.shape) / 2
             vector_to_center = ct_image_center_ijk - pca_centroid_ijk
             if np.dot(vector_to_center, pca_v_ijk) < 0:
                 pca_v_ijk = -pca_v_ijk
@@ -591,10 +583,6 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                           inputCT: vtkMRMLScalarVolumeNode,
                           electrodes: list[Electrode],
                           add_segmentation: bool) -> None:
-        progressbar = slicer.util.createProgressDialog()
-        progressbar.setCancelButton(None)
-        slicer.app.processEvents()
-        
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
@@ -605,19 +593,21 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
             segmentationNode.SetName("Bolts")
         
-        for i, electrode in enumerate(electrodes):
-            progressbar.setValue((i+1) / len(electrodes) * 100)
+        for electrode in electrodes:
             slicer.app.processEvents()
 
-            electrode_ijk = self.RAS_to_IJK(electrode.bolt_tip_ras, inputCT)[::-1] # flip coordinates to match flipped array
+            bolt_tip_ijk = self.RAS_to_IJK(electrode.bolt_tip_ras, inputCT)[::-1] # flip coordinates to match flipped array
 
             sphere_center = np.array(spherical_mask.shape) // 2
-            min_voxel = np.round(electrode_ijk - sphere_center).astype(int)
-            max_voxel = np.round(electrode_ijk + sphere_center + 1).astype(int)
+            min_voxel = np.round(bolt_tip_ijk - sphere_center).astype(int)
+            max_voxel = np.round(bolt_tip_ijk + sphere_center + 1).astype(int)
 
             # clip to image boundaries
             min_idx = np.maximum(min_voxel, 0)
             max_idx = np.minimum(max_voxel, ct_array.shape)
+
+            mask_start = min_idx - min_voxel
+            mask_end = mask_start + (max_idx - min_idx)
 
             # apply sphere
             bolt_mask= spherical_mask.copy()
@@ -634,29 +624,29 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             largest_label = np.argmax(counts[1:]) + 1
             bolt_mask[labels != largest_label] = 0
 
-            mask_start = min_idx - min_voxel
-            mask_end = mask_start + (max_idx - min_idx)
-
-            electrode.bolt_mask_array = np.zeros(ct_array.shape, dtype=np.uint8)
-            electrode.bolt_mask_array[min_idx[0]:max_idx[0],
-                                      min_idx[1]:max_idx[1],
-                                      min_idx[2]:max_idx[2]] = bolt_mask[mask_start[0]:mask_end[0],
-                                                                       mask_start[1]:mask_end[1],
-                                                                       mask_start[2]:mask_end[2]]
+            # save mask
+            electrode.bolt_mask_indices_ijk = np.array(np.nonzero(bolt_mask)).T + min_idx
 
             if add_segmentation:
-                label_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-                slicer.util.updateVolumeFromArray(label_node, electrode.bolt_mask_array)
+                bolt_segm = np.zeros(ct_array.shape, dtype=np.uint8)
+                bolt_segm[min_idx[0]:max_idx[0],
+                          min_idx[1]:max_idx[1],
+                          min_idx[2]:max_idx[2]] = bolt_mask[mask_start[0]:mask_end[0],
+                                                             mask_start[1]:mask_end[1],
+                                                             mask_start[2]:mask_end[2]]
+
+                labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+                slicer.util.updateVolumeFromArray(labelNode, bolt_segm)
 
                 ijkToRas = vtk.vtkMatrix4x4()
                 inputCT.GetIJKToRASMatrix(ijkToRas)
-                label_node.SetIJKToRASMatrix(ijkToRas)
-                label_node.SetOrigin(inputCT.GetOrigin())
+                labelNode.SetIJKToRASMatrix(ijkToRas)
+                labelNode.SetOrigin(inputCT.GetOrigin())
 
-                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(label_node, segmentationNode)
+                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelNode, segmentationNode)
                 seg_id = segmentationNode.GetSegmentation().GetSegmentIDs()[-1]
                 segmentationNode.GetSegmentation().GetSegment(seg_id).SetName(f"Bolt {electrode.label_prefix}")
-                slicer.mrmlScene.RemoveNode(label_node)
+                slicer.mrmlScene.RemoveNode(labelNode)
 
     def gaussian_ball(self,
                       shape: np.array,

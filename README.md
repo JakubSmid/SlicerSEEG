@@ -1,9 +1,11 @@
-- resize progress bars and add labels
-- fix memory leakage after deleting nodes from slicer
-- check algorithm on non standard spacing
-- skull stripping and reshape
-- debug checkbox to enable visualization
-- test edge cases (bolt spheres around the edge of the image, gaussian balls around the edge of the image)
-- check centers of the spheres and of the gaussinan balls
-- use cropped array around the balls for the correlation
-- evaluate differences between the GT and other methods
+- [ ] resize progress bars and add labels
+- [ ] fix memory leakage after deleting nodes from slicer
+- [ ] check algorithm on non standard spacing
+- [ ] skull stripping and reshape
+- [ ] debug checkbox to enable visualization
+- [ ] test edge cases (bolt spheres around the edge of the image, gaussian balls around the edge of the image)
+- [ ] check centers of the spheres and of the gaussinan balls
+- [ ] use cropped array around the balls for the correlation
+- [ ] evaluate differences between the GT and other methods
+- [ ] automatic installation of python packages
+- [ ] contact manual shifting
