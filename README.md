@@ -9,3 +9,4 @@
 - [ ] evaluate differences between the GT and other methods
 - [ ] automatic installation of python packages
 - [ ] contact manual shifting
+- [ ] warning when the angle of the last point is too big

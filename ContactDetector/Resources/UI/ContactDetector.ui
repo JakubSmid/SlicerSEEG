@@ -17,13 +17,6 @@
       <string>Inputs</string>
      </property>
      <layout class="QFormLayout" name="formLayout_2">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_6">
-        <property name="text">
-         <string>Input CT:</string>
-        </property>
-       </widget>
-      </item>
       <item row="0" column="1">
        <widget class="qMRMLNodeComboBox" name="inputSelectorCT">
         <property name="nodeTypes">
@@ -38,7 +31,7 @@
          <bool>false</bool>
         </property>
         <property name="removeEnabled">
-         <bool>false</bool>
+         <bool>true</bool>
         </property>
         <property name="interactionNodeSingletonTag">
          <string notr="true"/>
@@ -48,14 +41,52 @@
         </property>
        </widget>
       </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_6">
+        <property name="text">
+         <string>Input CT:</string>
+        </property>
+       </widget>
+      </item>
       <item row="1" column="0">
+       <widget class="QLabel" name="label_5">
+        <property name="text">
+         <string>T1 for masking:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="inputSelectorT1">
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLScalarVolumeNode</string>
+         </stringlist>
+        </property>
+        <property name="hideChildNodeTypes">
+         <stringlist notr="true"/>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="interactionNodeSingletonTag">
+         <string notr="true"/>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>inputT1</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
          <string>Brain mask:</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <widget class="qMRMLNodeComboBox" name="inputSelectorBrainMask">
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -65,6 +96,12 @@
         <property name="hideChildNodeTypes">
          <stringlist notr="true"/>
         </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
         <property name="interactionNodeSingletonTag">
          <string notr="true"/>
         </property>
@@ -73,15 +110,15 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_8">
         <property name="text">
-         <string>Bolt tip fiducials:</string>
+         <string>Bolt fiducials:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
-       <widget class="qMRMLNodeComboBox" name="boltTipSelector">
+      <item row="3" column="1">
+       <widget class="qMRMLNodeComboBox" name="boltMarkupsSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
           <string>vtkMRMLMarkupsFiducialNode</string>
@@ -94,58 +131,13 @@
          <bool>false</bool>
         </property>
         <property name="removeEnabled">
-         <bool>false</bool>
+         <bool>true</bool>
         </property>
         <property name="interactionNodeSingletonTag">
          <string notr="true"/>
         </property>
         <property name="SlicerParameterName" stdset="0">
          <string>boltFiducials</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="electrodeModelCollapsibleButton">
-     <property name="enabled">
-      <bool>true</bool>
-     </property>
-     <property name="text">
-      <string>Electrode model</string>
-     </property>
-     <property name="collapsed">
-      <bool>true</bool>
-     </property>
-     <layout class="QFormLayout" name="formLayout_3">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_9">
-        <property name="text">
-         <string>Contact length (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QDoubleSpinBox" name="doubleSpinBox_2"/>
-      </item>
-      <item row="2" column="1">
-       <widget class="QDoubleSpinBox" name="doubleSpinBox"/>
-      </item>
-      <item row="1" column="1">
-       <widget class="QDoubleSpinBox" name="doubleSpinBox_3"/>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_4">
-        <property name="text">
-         <string>Gap between contacts (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_10">
-        <property name="text">
-         <string>Electrode diameter (mm):</string>
         </property>
        </widget>
       </item>
@@ -164,14 +156,20 @@
       <item row="0" column="0">
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>Sphere diameter around the bolt (mm):</string>
+         <string>Sphere radius around the bolt (mm):</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_2">
-        <property name="text">
-         <string>Gaussian blob size (sigma):</string>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="boltSphereRadius">
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="value">
+         <double>10.000000000000000</double>
         </property>
        </widget>
       </item>
@@ -182,14 +180,165 @@
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
-       <widget class="QDoubleSpinBox" name="doubleSpinBox_4"/>
-      </item>
       <item row="1" column="1">
-       <widget class="QDoubleSpinBox" name="doubleSpinBox_5"/>
+       <widget class="QDoubleSpinBox" name="metalThreshold">
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <double>9999999.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>3000.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Gaussian blob size (sigma):</string>
+        </property>
+       </widget>
       </item>
       <item row="2" column="1">
-       <widget class="QDoubleSpinBox" name="doubleSpinBox_6"/>
+       <widget class="QDoubleSpinBox" name="blobSize">
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="minimum">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>100.000000000000000</double>
+        </property>
+        <property name="value">
+         <double>3.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_9">
+        <property name="text">
+         <string>Contact length (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QDoubleSpinBox" name="contactLength">
+        <property name="minimum">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="value">
+         <double>2.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_4">
+        <property name="text">
+         <string>Gap between contacts (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QDoubleSpinBox" name="contactGap">
+        <property name="minimum">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.500000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>Electrode diameter (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QDoubleSpinBox" name="contactDiameter">
+        <property name="minimum">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.800000000000000</double>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton_3">
+     <property name="text">
+      <string>3D Rendering</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout_3">
+      <item>
+       <widget class="QRadioButton" name="radioButtonRenderingDisabled">
+        <property name="text">
+         <string>Disabled</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="radioButtonRenderingSkull">
+        <property name="text">
+         <string>Skull</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="radioButtonRenderingBolts">
+        <property name="text">
+         <string>Bolts</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton_4">
+     <property name="text">
+      <string>Skull-stripping</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <item>
+         <widget class="QLabel" name="label_11">
+          <property name="text">
+           <string>Threshold:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="threshold">
+          <property name="maximum">
+           <number>99999</number>
+          </property>
+          <property name="value">
+           <number>100</number>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="buttonSkullStripping">
+        <property name="text">
+         <string>Create new segmentation</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </widget>
@@ -200,14 +349,7 @@
       <string>Step by step</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2" columnstretch="1,0">
-      <item row="0" column="0">
-       <widget class="QPushButton" name="buttonBoltSegmentation">
-        <property name="text">
-         <string>Bolt segmentation</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="1">
+      <item row="12" column="1">
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
          <widget class="QRadioButton" name="radioButtonFiducials">
@@ -237,45 +379,52 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="0">
+      <item row="10" column="0">
        <widget class="QPushButton" name="buttonBoltAxisEst">
         <property name="text">
          <string>Bolt axis estimation</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="0">
+      <item row="12" column="0">
        <widget class="QPushButton" name="buttonCurveFitting">
         <property name="text">
          <string>Curve fitting</string>
         </property>
        </widget>
       </item>
-      <item row="0" column="1">
-       <widget class="QCheckBox" name="checkBoxBoltSegmentation">
+      <item row="8" column="0">
+       <widget class="QPushButton" name="buttonBoltSegmentation">
         <property name="text">
-         <string>Show bolt segmentation</string>
+         <string>Bolt segmentation</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="10" column="1">
+       <widget class="QCheckBox" name="checkBoxLinearApproximation">
+        <property name="text">
+         <string>Show linear approximation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="11" column="1">
        <widget class="QCheckBox" name="checkBoxElectrodeSegmentation">
         <property name="text">
          <string>Show electrode segmentation</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="11" column="0">
        <widget class="QPushButton" name="buttonElectrodeSegmentation">
         <property name="text">
          <string>Electrode segmentation (GMM)</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
-       <widget class="QCheckBox" name="checkBoxLinearApproximation">
+      <item row="8" column="1">
+       <widget class="QCheckBox" name="checkBoxBoltSegmentation">
         <property name="text">
-         <string>Show linear approximation</string>
+         <string>Show bolt segmentation</string>
         </property>
        </widget>
       </item>
@@ -366,7 +515,7 @@
   <connection>
    <sender>ContactDetector</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
-   <receiver>boltTipSelector</receiver>
+   <receiver>boltMarkupsSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
    <hints>
     <hint type="sourcelabel">
@@ -376,6 +525,22 @@
     <hint type="destinationlabel">
      <x>326</x>
      <y>117</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>ContactDetector</sender>
+   <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
+   <receiver>inputSelectorT1</receiver>
+   <slot>setMRMLScene(vtkMRMLScene*)</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>345</x>
+     <y>383</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>395</x>
+     <y>86</y>
     </hint>
    </hints>
   </connection>

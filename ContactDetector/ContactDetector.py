@@ -121,22 +121,18 @@ class ContactDetectorParameterNode:
     invertedVolume - The output volume that will contain the inverted thresholded volume.
     """
 
-    inputVolume: vtkMRMLScalarVolumeNode
-    imageThreshold: Annotated[float, WithinRange(-100, 500)] = 100
-    invertThreshold: bool = False
-    thresholdedVolume: vtkMRMLScalarVolumeNode
-    invertedVolume: vtkMRMLScalarVolumeNode
     inputCT: vtkMRMLScalarVolumeNode
+    inputT1: vtkMRMLScalarVolumeNode
     brainMask: vtkMRMLSegmentationNode
     boltFiducials: vtkMRMLMarkupsFiducialNode
 
 
 class Electrode():
-    def __init__(self, bolt_tip_ras, label):
+    def __init__(self, bolt_tip_ras, label, contact_length_mm, contact_gap_mm):
         self.bolt_tip_ras = np.array(bolt_tip_ras)
         self.label = label
         self.label_prefix, self.n_contacts = Electrode.split_label(label)
-        self.length_mm = 2*self.n_contacts + 1.5 * (self.n_contacts - 1)
+        self.length_mm = contact_length_mm * self.n_contacts + contact_gap_mm * (self.n_contacts - 1)
         
         self.bolt_segmentation_indices_ijk = None
 
@@ -193,44 +189,112 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # These connections ensure that we update parameter node when scene is closed
         # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
+        self.ui.inputSelectorCT.connect('currentNodeChanged(vtkMRMLNode*)', self.onInputSelectorCTChanged)
 
         # Buttons
         # self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
-        self.ui.buttonBoltSegmentation.connect("clicked(bool)", self.onBoltSegmentationButton)
-        self.ui.buttonBoltAxisEst.connect("clicked(bool)", self.onBoltAxisEstButton)
-        self.ui.buttonElectrodeSegmentation.connect("clicked(bool)", self.onElectrodeSegmentationButton)
-        self.ui.buttonCurveFitting.connect("clicked(bool)", self.onCurveFittingButton)
+        self.ui.radioButtonRenderingBolts.connect("clicked(bool)", self.onRenderingBoltsClicked)
+        self.ui.radioButtonRenderingSkull.connect("clicked(bool)", self.onRenderingSkullClicked)
+        self.ui.radioButtonRenderingDisabled.connect("clicked(bool)", self.onRenderingDisabledClicked)
+
+        self.ui.buttonSkullStripping.connect("clicked(bool)", self.onSkullStrippingClicked)
+
+        self.ui.buttonBoltSegmentation.connect("clicked(bool)", self.onBoltSegmentationClicked)
+        self.ui.buttonBoltAxisEst.connect("clicked(bool)", self.onBoltAxisEstClicked)
+        self.ui.buttonElectrodeSegmentation.connect("clicked(bool)", self.onElectrodeSegmentationClicked)
+        self.ui.buttonCurveFitting.connect("clicked(bool)", self.onCurveFittingClicked)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
 
-    def onCurveFittingButton(self):
+    def onCurveFittingClicked(self):
         fiducials = self.ui.radioButtonFiducials.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.curve_fitting(self._parameterNode.inputCT, self.electrodes, fiducials)
+            self.logic.curve_fitting(self._parameterNode.inputCT,
+                                     self.electrodes,
+                                     self.ui.boltSphereRadius.value,
+                                     self.ui.blobSize.value,
+                                     self.ui.contactDiameter.value,
+                                     self.ui.contactLength.value,
+                                     self.ui.contactGap.value,
+                                     fiducials)
 
-    def onElectrodeSegmentationButton(self):
+    def onElectrodeSegmentationClicked(self):
         add_segmentation = self.ui.checkBoxElectrodeSegmentation.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.eletrode_segmentation(self._parameterNode.inputCT, self._parameterNode.brainMask, self.electrodes, add_segmentation)
+            self.logic.eletrode_segmentation(self._parameterNode.inputCT, self._parameterNode.brainMask, self.electrodes, self.ui.metalThreshold.value, add_segmentation)
 
-    def onBoltAxisEstButton(self):
+    def onBoltAxisEstClicked(self):
         add_line = self.ui.checkBoxLinearApproximation.isChecked()
         with slicer.util.WaitCursor():
             self.logic.bolt_axis_estimation(self._parameterNode.inputCT, self.electrodes, add_line)
 
-    def onBoltSegmentationButton(self):
+    def onBoltSegmentationClicked(self):
         # load electrodes
         self.electrodes = []
         for i in range(self._parameterNode.boltFiducials.GetNumberOfControlPoints()):
             bolt_tip_ras = [0, 0, 0]
             self._parameterNode.boltFiducials.GetNthControlPointPosition(i, bolt_tip_ras)
-            self.electrodes.append(Electrode(bolt_tip_ras, self._parameterNode.boltFiducials.GetNthControlPointLabel(i)))
+            self.electrodes.append(Electrode(bolt_tip_ras, self._parameterNode.boltFiducials.GetNthControlPointLabel(i), self.ui.contactLength.value, self.ui.contactGap.value))
 
         # segment bolts
         add_segmentation = self.ui.checkBoxBoltSegmentation.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.bolt_segmentation(self._parameterNode.inputCT, self.electrodes, add_segmentation)
+            self.logic.bolt_segmentation(self._parameterNode.inputCT, self.electrodes, self.ui.boltSphereRadius.value, self.ui.metalThreshold.value, add_segmentation)
+    
+    def onSkullStrippingClicked(self):
+        if self._parameterNode.inputT1 is None:
+            slicer.util.errorDisplay("Please select a T1 volume first.")
+            return
+        if self._parameterNode.brainMask is not None:
+            slicer.util.errorDisplay("You have already selected a brain mask. Select None brain mask in the input section if you want to create a new one.")
+            return
+
+        with slicer.util.WaitCursor():
+            segmentationNode = self.logic.skull_stripping(self._parameterNode.inputT1, self.ui.threshold.value)
+            self._parameterNode.brainMask = segmentationNode
+
+    def onRenderingBoltsClicked(self):
+        if self._parameterNode.inputCT is None:
+            slicer.util.errorDisplay("Please select a CT volume first.")
+            self.ui.radioButtonRenderingDisabled.setChecked(True)
+            return
+
+        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+        range = self._parameterNode.inputCT.GetImageData().GetScalarRange()
+
+        scalarOpacity = displayNode.GetVolumePropertyNode().GetScalarOpacity()
+
+        scalarOpacity.RemoveAllPoints()
+        scalarOpacity.AddPoint(self.ui.metalThreshold.value, 0.0)
+        scalarOpacity.AddPoint(self.ui.metalThreshold.value+0.1, 1.0)
+        scalarOpacity.AddPoint(range[1], 1.0)
+        displayNode.SetVisibility(True)
+
+    def onRenderingSkullClicked(self):
+        if self._parameterNode.inputCT is None:
+            slicer.util.errorDisplay("Please select a CT volume first.")
+            self.ui.radioButtonRenderingDisabled.setChecked(True)
+            return
+
+        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+        range = self._parameterNode.inputCT.GetImageData().GetScalarRange()
+
+        scalarOpacity = displayNode.GetVolumePropertyNode().GetScalarOpacity()
+        scalarOpacity.RemoveAllPoints()
+        scalarOpacity.AddPoint(0, 0.0)
+        scalarOpacity.AddPoint(range[1], 1.0)
+        displayNode.SetVisibility(True)
+
+    def onRenderingDisabledClicked(self):
+        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+        displayNode.SetVisibility(False)
+
+    def onInputSelectorCTChanged(self):
+        # disable rendering for the new CT
+        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+        displayNode.SetVisibility(False)
+        self.ui.radioButtonRenderingDisabled.setChecked(True)
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -248,17 +312,6 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
             self._parameterNodeGuiTag = None
             # self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
-
-    def onSceneStartClose(self, caller, event) -> None:
-        """Called just before the scene is closed."""
-        # Parameter node will be reset, do not use it anymore
-        self.setParameterNode(None)
-
-    def onSceneEndClose(self, caller, event) -> None:
-        """Called just after the scene is closed."""
-        # If this module is shown while the scene is closed then recreate a new parameter node immediately
-        if self.parent.isEntered:
-            self.initializeParameterNode()
 
     def initializeParameterNode(self) -> None:
         """Ensure parameter node exists and observed."""
@@ -288,28 +341,6 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             # ui element that needs connection.
             self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
             # self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
-            # self._checkCanApply()
-
-    # def _checkCanApply(self, caller=None, event=None) -> None:
-    #     if self._parameterNode and self._parameterNode.inputVolume and self._parameterNode.thresholdedVolume:
-    #         self.ui.applyButton.toolTip = _("Compute output volume")
-    #         self.ui.applyButton.enabled = True
-    #     else:
-    #         self.ui.applyButton.toolTip = _("Select input and output volume nodes")
-    #         self.ui.applyButton.enabled = False
-
-    def onApplyButton(self) -> None:
-        """Run processing when user clicks "Apply" button."""
-        with slicer.util.tryWithErrorDisplay(_("Failed to compute results."), waitCursor=True):
-            # Compute output
-            self.logic.process(self.ui.inputSelector.currentNode(), self.ui.outputSelector.currentNode(),
-                               self.ui.imageThresholdSliderWidget.value, self.ui.invertOutputCheckBox.checked)
-
-            # Compute inverted output (if needed)
-            if self.ui.invertedOutputSelector.currentNode():
-                # If additional output volume is selected then result with inverted threshold is written there
-                self.logic.process(self.ui.inputSelector.currentNode(), self.ui.invertedOutputSelector.currentNode(),
-                                   self.ui.imageThresholdSliderWidget.value, not self.ui.invertOutputCheckBox.checked, showResult=False)
 
 
 #
@@ -337,14 +368,19 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
     def curve_fitting(self,
             inputCT: vtkMRMLScalarVolumeNode,
             electrodes: list[Electrode],
+            sphere_radius_mm: float,
+            blob_size_sigma: float,
+            contact_diameter_mm: float,
+            contact_length_mm: float,
+            contact_gap_mm: float,
             fiducials: bool = False):
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
         # precompute gaussian ball
-        sigma_mm = 0.8
+        sigma_mm = contact_diameter_mm
         sigma_ijk = sigma_mm / np.array(inputCT.GetSpacing())[::-1]
-        ball_shape = (3 * sigma_ijk).astype(int) # shape of 3 sigma
+        ball_shape = (blob_size_sigma * sigma_ijk).astype(int) # blob_size_sigma defines size of the gaussian ball in sigmas
         
         # ensure odd shape
         if ball_shape[0] % 2 == 0:
@@ -385,7 +421,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             coeffs_y = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 1], 5, w=intensities)
             coeffs_z = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 2], 5, w=intensities)
 
-            X = np.linspace(s.min(), s.max(), np.ceil((electrode.length_mm + 20) / 0.1).astype(int)) # electrode.length_mm + sphere around bolt (20 mm)
+            X = np.linspace(s.min(), s.max(), np.ceil((electrode.length_mm + 2*sphere_radius_mm) / 0.1).astype(int)) # electrode.length_mm + sphere around the bolt / 0.1 mm resolution
             x_fit = np.polyval(coeffs_x, X)
             y_fit = np.polyval(coeffs_y, X)
             z_fit = np.polyval(coeffs_z, X)
@@ -397,7 +433,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             distances_list = np.linalg.norm(diffs, axis=1)
 
             # get number of points between first and second contact
-            selected_points = self.select_contact_points(points_list, distances_list, 0, electrode.n_contacts)
+            selected_points = self.select_contact_points(points_list, distances_list, 0, electrode.n_contacts, contact_length_mm, contact_gap_mm)
             second_contact_point = selected_points[1]
             n = np.where(points_list == second_contact_point)[0][0]
 
@@ -407,7 +443,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 slicer.app.processEvents()
 
                 # select points from the fitted curve
-                selected_points = self.select_contact_points(points_list, distances_list, offset, electrode.n_contacts)
+                selected_points = self.select_contact_points(points_list, distances_list, offset, electrode.n_contacts, contact_length_mm, contact_gap_mm)
                 gaussian_balls_volume = np.zeros(ct_array.shape)
 
                 # generate gaussian balls
@@ -466,18 +502,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                               inputCT: vtkMRMLScalarVolumeNode, 
                               brainMask: vtkMRMLSegmentationNode,
                               electrodes: list[Electrode],
+                              metal_threshold: float,
                               add_segmentation: bool):
         # prepare copy of the data array
         ct_array = slicer.util.arrayFromVolume(inputCT).copy()
-
-        # get brain mask
-        brain_mask_labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode") # convert segmentation to labelmap
-        slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(brainMask, brain_mask_labelmap, inputCT)
-        brain_mask_array = slicer.util.arrayFromVolume(brain_mask_labelmap)
-        slicer.mrmlScene.RemoveNode(brain_mask_labelmap)
+        brain_mask_array = slicer.util.arrayFromSegmentBinaryLabelmap(brainMask, brainMask.GetSegmentation().GetSegmentIDs()[0], inputCT)
 
         # apply brain mask and threshold
-        ct_array[(brain_mask_array == 0) | (ct_array < 3000)] = 0
+        ct_array[(brain_mask_array == 0) | (ct_array < metal_threshold)] = 0
 
         # include bolt area
         for electrode in electrodes:
@@ -512,6 +544,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         if add_segmentation:
             segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
             segmentationNode.SetName("Electrodes")
+            segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(inputCT)
+            segmentationNode.CreateDefaultDisplayNodes()
        
         # assign gmm labels
         for i, electrode in enumerate(electrodes):
@@ -524,19 +558,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 i,j,k = electrode.gmm_segmentation_indices_ijk.T
                 gmm_volume_array[i,j,k] = 1
 
-                # add nodes
-                labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-                slicer.util.updateVolumeFromArray(labelNode, gmm_volume_array)
-
-                ijkToRas = vtk.vtkMatrix4x4()
-                inputCT.GetIJKToRASMatrix(ijkToRas)
-                labelNode.SetIJKToRASMatrix(ijkToRas)
-                labelNode.SetOrigin(inputCT.GetOrigin())
-
-                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelNode, segmentationNode)
-                seg_id = segmentationNode.GetSegmentation().GetSegmentIDs()[-1]
-                segmentationNode.GetSegmentation().GetSegment(seg_id).SetName(f"Electrode {electrode.label_prefix}")
-                slicer.mrmlScene.RemoveNode(labelNode)
+                segmentId = segmentationNode.GetSegmentation().AddEmptySegment()
+                segmentationNode.GetSegmentation().GetSegment(segmentId).SetName(f"Electrode {electrode.label_prefix}")
+                slicer.util.updateSegmentBinaryLabelmapFromArray(gmm_volume_array, segmentationNode, segmentId)
 
     def bolt_axis_estimation(self,
                              inputCT: vtkMRMLScalarVolumeNode,
@@ -582,16 +606,20 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
     def bolt_segmentation(self,
                           inputCT: vtkMRMLScalarVolumeNode,
                           electrodes: list[Electrode],
+                          sphere_radius_mm: float,
+                          metal_threshold: float,
                           add_segmentation: bool) -> None:
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
         # create a sphere with radius 10 voxels
-        spherical_mask = self.create_spherical_mask(np.array(inputCT.GetSpacing()))
+        spherical_mask = self.create_spherical_mask(np.array(inputCT.GetSpacing()), sphere_radius_mm)
 
         if add_segmentation:
             segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
             segmentationNode.SetName("Bolts")
+            segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(inputCT)
+            segmentationNode.CreateDefaultDisplayNodes()
         
         for electrode in electrodes:
             slicer.app.processEvents()
@@ -616,7 +644,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             ct_crop = ct_array[min_idx[0]:max_idx[0],
                                min_idx[1]:max_idx[1],
                                min_idx[2]:max_idx[2]]
-            bolt_mask[ct_crop < 3000] = 0
+            bolt_mask[ct_crop < metal_threshold] = 0
 
             # find the largest connected component (full connectivity)
             labels = skimage.measure.label(bolt_mask)
@@ -635,18 +663,26 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                                                              mask_start[1]:mask_end[1],
                                                              mask_start[2]:mask_end[2]]
 
-                labelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-                slicer.util.updateVolumeFromArray(labelNode, bolt_segm)
+                segmentId = segmentationNode.GetSegmentation().AddEmptySegment()
+                segmentationNode.GetSegmentation().GetSegment(segmentId).SetName(f"Bolt {electrode.label_prefix}")
+                slicer.util.updateSegmentBinaryLabelmapFromArray(bolt_segm, segmentationNode, segmentId)
 
-                ijkToRas = vtk.vtkMatrix4x4()
-                inputCT.GetIJKToRASMatrix(ijkToRas)
-                labelNode.SetIJKToRASMatrix(ijkToRas)
-                labelNode.SetOrigin(inputCT.GetOrigin())
+    def skull_stripping(self,
+                        inputT1: vtkMRMLScalarVolumeNode,
+                        threshold: float = 100) -> vtkMRMLSegmentationNode:
+        t1_array = slicer.util.arrayFromVolume(inputT1)
+        #t1_unique = np.unique(t1_array)
 
-                slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelNode, segmentationNode)
-                seg_id = segmentationNode.GetSegmentation().GetSegmentIDs()[-1]
-                segmentationNode.GetSegmentation().GetSegment(seg_id).SetName(f"Bolt {electrode.label_prefix}")
-                slicer.mrmlScene.RemoveNode(labelNode)
+        #p_low = np.percentile(t1_unique, percentile)
+        t1_mask = (t1_array > threshold).astype(np.uint8)
+
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(inputT1)
+        segmentationNode.CreateDefaultDisplayNodes()
+        segmentId = segmentationNode.GetSegmentation().AddEmptySegment()
+        slicer.util.updateSegmentBinaryLabelmapFromArray(t1_mask, segmentationNode, segmentId)
+
+        return segmentationNode
 
     def gaussian_ball(self,
                       shape: np.array,
@@ -666,9 +702,11 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                               points: np.array,
                               distances: np.array,
                               n_offset: int,
-                              n_contacts: int) -> np.array:
+                              n_contacts: int,
+                              contact_length_mm: float,
+                              contact_gap_mm: float) -> np.array:
         cumulative = np.cumsum(distances[n_offset:])
-        target_distances = np.arange(n_contacts) * 3.5
+        target_distances = np.arange(n_contacts) * (contact_length_mm + contact_gap_mm)
 
         chosen_idx = []
         for t in target_distances:
@@ -721,44 +759,6 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         volumeNode.GetIJKToRASMatrix(volumeIjkToRas)
         point_Ras = volumeIjkToRas.MultiplyPoint(np.append(point_IJK,1.0))
         return np.array(point_Ras[:3])
-
-    def process(self,
-                inputVolume: vtkMRMLScalarVolumeNode,
-                outputVolume: vtkMRMLScalarVolumeNode,
-                imageThreshold: float,
-                invert: bool = False,
-                showResult: bool = True) -> None:
-        """
-        Run the processing algorithm.
-        Can be used without GUI widget.
-        :param inputVolume: volume to be thresholded
-        :param outputVolume: thresholding result
-        :param imageThreshold: values above/below this threshold will be set to 0
-        :param invert: if True then values above the threshold will be set to 0, otherwise values below are set to 0
-        :param showResult: show output volume in slice viewers
-        """
-
-        if not inputVolume or not outputVolume:
-            raise ValueError("Input or output volume is invalid")
-
-        import time
-
-        startTime = time.time()
-        logging.info("Processing started")
-
-        # Compute the thresholded output volume using the "Threshold Scalar Volume" CLI module
-        cliParams = {
-            "InputVolume": inputVolume.GetID(),
-            "OutputVolume": outputVolume.GetID(),
-            "ThresholdValue": imageThreshold,
-            "ThresholdType": "Above" if invert else "Below",
-        }
-        cliNode = slicer.cli.run(slicer.modules.thresholdscalarvolume, None, cliParams, wait_for_completion=True, update_display=showResult)
-        # We don't need the CLI module node anymore, remove it to not clutter the scene with it
-        slicer.mrmlScene.RemoveNode(cliNode)
-
-        stopTime = time.time()
-        logging.info(f"Processing completed in {stopTime-startTime:.2f} seconds")
 
 
 #
