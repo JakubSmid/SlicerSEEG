@@ -17,9 +17,6 @@ from slicer.parameterNodeWrapper import (
 from slicer import vtkMRMLScalarVolumeNode, vtkMRMLSegmentationNode, vtkMRMLMarkupsFiducialNode
 
 import numpy as np
-import skimage
-from sklearn.decomposition import PCA
-from sklearn.mixture import GaussianMixture
 
 #
 # ContactDetector
@@ -291,10 +288,11 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         displayNode.SetVisibility(False)
 
     def onInputSelectorCTChanged(self):
-        # disable rendering for the new CT
-        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
-        displayNode.SetVisibility(False)
-        self.ui.radioButtonRenderingDisabled.setChecked(True)
+        if self._parameterNode.inputCT is not None:
+            # disable rendering for the new CT
+            displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+            displayNode.SetVisibility(False)
+            self.ui.radioButtonRenderingDisabled.setChecked(True)
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -374,6 +372,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             contact_length_mm: float,
             contact_gap_mm: float,
             fiducials: bool = False):
+        # import or install dependencies
+        try:
+            from sklearn.decomposition import PCA
+        except ModuleNotFoundError:
+            if slicer.util.confirmOkCancelDisplay("This module requires 'scikit-learn' Python package. Click OK to install it now."):
+                slicer.util.pip_install("scikit-learn")
+                from sklearn.decomposition import PCA
+
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
@@ -504,6 +510,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                               electrodes: list[Electrode],
                               metal_threshold: float,
                               add_segmentation: bool):
+        # import or install dependencies
+        try:
+            from sklearn.mixture import GaussianMixture
+        except ModuleNotFoundError:
+            if slicer.util.confirmOkCancelDisplay("This module requires 'scikit-learn' Python package. Click OK to install it now."):
+                slicer.util.pip_install("scikit-learn")
+                from sklearn.mixture import GaussianMixture
+
         # prepare copy of the data array
         ct_array = slicer.util.arrayFromVolume(inputCT).copy()
         brain_mask_array = slicer.util.arrayFromSegmentBinaryLabelmap(brainMask, brainMask.GetSegmentation().GetSegmentIDs()[0], inputCT)
@@ -566,6 +580,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                              inputCT: vtkMRMLScalarVolumeNode,
                              electrodes: list[Electrode],
                              add_line: bool) -> None:
+        # import or install dependencies
+        try:
+            from sklearn.decomposition import PCA
+        except ModuleNotFoundError:
+            if slicer.util.confirmOkCancelDisplay("This module requires 'scikit-learn' Python package. Click OK to install it now."):
+                slicer.util.pip_install("scikit-learn")
+                from sklearn.decomposition import PCA
+
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
@@ -609,6 +631,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                           sphere_radius_mm: float,
                           metal_threshold: float,
                           add_segmentation: bool) -> None:
+        # import or install dependencies
+        try:
+            import skimage
+        except ModuleNotFoundError:
+            if slicer.util.confirmOkCancelDisplay("This module requires 'scikit-image' Python package. Click OK to install it now."):
+                slicer.util.pip_install("scikit-image")
+                import skimage
+
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
