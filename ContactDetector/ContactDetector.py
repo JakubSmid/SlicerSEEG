@@ -136,6 +136,11 @@ class Electrode():
         self.tip_ijk = None
         self.entry_point_ijk = None
         self.gmm_segmentation_indices_ijk = None
+
+        self.curve_points = None
+        self.curve_cumulative_distances = None
+        self.curve_points_offset = None
+        self.shift_fiducials_value = 0
     
     @staticmethod
     def split_label(electrode_name):
@@ -161,6 +166,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._parameterNodeGuiTag = None
 
         self.electrodes: list[Electrode] = []
+        self.selected_electrode = None
+        self.selected_markup_index = None
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -177,6 +184,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # "setMRMLScene(vtkMRMLScene*)" slot.
         uiWidget.setMRMLScene(slicer.mrmlScene)
 
+        self.ui.shiftFiducialsWidget.setVisible(False)
+
         # Create logic class. Logic implements all computations that should be possible to run
         # in batch mode, without a graphical user interface.
         self.logic = ContactDetectorLogic()
@@ -187,6 +196,9 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
         self.ui.inputSelectorCT.connect('currentNodeChanged(vtkMRMLNode*)', self.onInputSelectorCTChanged)
+        self.ui.SimpleMarkupsWidget.connect('currentMarkupsControlPointSelectionChanged(int)', self.onCurrentMarkupsControlPointSelectionChanged)
+        self.ui.SimpleMarkupsWidget.connect('markupsNodeChanged()', self.onMarkupsNodeChanged)
+        self.ui.shiftElectrodeSpinBox.connect('valueChanged(int)', self.onShiftElectrodeSpinBoxChanged)
 
         # Buttons
         # self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
@@ -204,17 +216,75 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
 
+    def onShiftElectrodeSpinBoxChanged(self, spin_box_value):
+        fiducial_node = self.ui.SimpleMarkupsWidget.currentNode()
+        self.selected_electrode.shift_fiducials_value = spin_box_value
+
+        # get fiducials list
+        fiducial_idx = []
+        for i in range(fiducial_node.GetNumberOfControlPoints()):
+            if fiducial_node.GetNthControlPointLabel(i).startswith(self.selected_electrode.label_prefix):
+                fiducial_idx.append(i)
+
+        selected_points = self.logic.select_contact_points(self.selected_electrode.curve_points,
+                                                           self.selected_electrode.curve_cumulative_distances,
+                                                           self.selected_electrode.curve_points_offset,
+                                                           self.selected_electrode.n_contacts,
+                                                           self.ui.contactLength.value,
+                                                           self.ui.contactGap.value,
+                                                           spin_box_value)
+
+        # pause rendering while changing fiducial positions
+        with slicer.util.RenderBlocker():
+            # convert to RAS
+            for i, point in enumerate(selected_points):
+                    selected_points[i] = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
+                    fiducial_node.SetNthControlPointPosition(fiducial_idx[i], selected_points[i])
+
+            # jump slices to updated fiducials
+            slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(fiducial_node.GetID(), self.selected_markup_index, True)
+
+
+    def onCurrentMarkupsControlPointSelectionChanged(self, markupIndex):
+        fiducial_node = self.ui.SimpleMarkupsWidget.currentNode()
+        selected_label = fiducial_node.GetNthControlPointLabel(markupIndex)
+        self.selected_markup_index = markupIndex
+
+        # find electrode by name
+        for electrode in self.electrodes:
+            if selected_label.startswith(electrode.label_prefix):
+                self.selected_electrode = electrode
+                self.ui.shiftElectrodeLabel.setText(f"Shift {electrode.label_prefix} fiducials:")
+
+                self.ui.shiftElectrodeSpinBox.disconnect('valueChanged(int)')
+                self.ui.shiftElectrodeSpinBox.setValue(electrode.shift_fiducials_value)
+                self.ui.shiftElectrodeSpinBox.connect('valueChanged(int)', self.onShiftElectrodeSpinBoxChanged)
+                break
+
+    def onMarkupsNodeChanged(self):
+        # check for invalid markup node in the list
+        if self.ui.SimpleMarkupsWidget.currentNode() is None or self.ui.SimpleMarkupsWidget.currentNode().GetName() != "Electrodes":
+            self.ui.shiftFiducialsWidget.setVisible(False)
+
     def onCurveFittingClicked(self):
-        fiducials = self.ui.radioButtonFiducials.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.curve_fitting(self._parameterNode.inputCT,
-                                     self.electrodes,
-                                     self.ui.boltSphereRadius.value,
-                                     self.ui.blobSize.value,
-                                     self.ui.contactDiameter.value,
-                                     self.ui.contactLength.value,
-                                     self.ui.contactGap.value,
-                                     fiducials)
+            markupsNode = self.logic.curve_fitting(self._parameterNode.inputCT,
+                                                   self.electrodes,
+                                                   self.ui.boltSphereRadius.value,
+                                                   self.ui.blobSize.value,
+                                                   self.ui.contactDiameter.value,
+                                                   self.ui.contactLength.value,
+                                                   self.ui.contactGap.value)
+        # show markupsNode in the list widget
+        self.ui.SimpleMarkupsWidget.setCurrentNode(markupsNode)
+        
+        # highlight the first control point
+        self.ui.SimpleMarkupsWidget.setJumpToSliceEnabled(False)
+        self.ui.SimpleMarkupsWidget.highlightNthControlPoint(0)
+        self.ui.SimpleMarkupsWidget.setJumpToSliceEnabled(True)
+
+        # make list widget visible
+        self.ui.shiftFiducialsWidget.setVisible(True)
 
     def onElectrodeSegmentationClicked(self):
         add_segmentation = self.ui.checkBoxElectrodeSegmentation.isChecked()
@@ -370,8 +440,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             blob_size_sigma: float,
             contact_diameter_mm: float,
             contact_length_mm: float,
-            contact_gap_mm: float,
-            fiducials: bool = False):
+            contact_gap_mm: float):
         # import or install dependencies
         try:
             from sklearn.decomposition import PCA
@@ -399,10 +468,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         ball_radius = ball_shape // 2
         gaussian_ball = self.gaussian_ball(ball_shape, sigma_ijk)
 
-        if fiducials:
-            markupsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-            markupsNode.SetName("Electrodes")
-        
+        # prepare markups
+        markupsNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
+        markupsNode.SetName("Electrodes")
+
         for electrode in electrodes:
             slicer.app.processEvents()
             
@@ -427,29 +496,35 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             coeffs_y = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 1], 5, w=intensities)
             coeffs_z = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 2], 5, w=intensities)
 
-            X = np.linspace(s.min(), s.max(), np.ceil((electrode.length_mm + 2*sphere_radius_mm) / 0.1).astype(int)) # electrode.length_mm + sphere around the bolt / 0.1 mm resolution
+            # extend projection of the points
+            extend_mm = 2*(contact_length_mm + contact_gap_mm)
+            extend_ijk = extend_mm / np.linalg.norm(pca_v_ijk * inputCT.GetSpacing()[::-1])
+
+            # electrode.length_mm + backwards_mm + sphere around the bolt / 0.1 mm resolution
+            num_points = np.ceil((electrode.length_mm + extend_mm + 2*sphere_radius_mm) / 0.1).astype(int)
+            X = np.linspace(s.min()-extend_ijk, s.max(), num_points)
             x_fit = np.polyval(coeffs_x, X)
             y_fit = np.polyval(coeffs_y, X)
             z_fit = np.polyval(coeffs_z, X)
 
-            points_list = np.column_stack((x_fit, y_fit, z_fit))
+            electrode.curve_points = np.column_stack((x_fit, y_fit, z_fit))
 
             # compute distance between points on the curve
-            diffs = np.diff(points_list * inputCT.GetSpacing()[::-1], axis=0)
-            distances_list = np.linalg.norm(diffs, axis=1)
+            diffs = np.diff(electrode.curve_points * inputCT.GetSpacing()[::-1], axis=0)
+            curve_distances_between_points = np.linalg.norm(diffs, axis=1)
+            electrode.curve_cumulative_distances = np.cumsum(curve_distances_between_points)
 
-            # get number of points between first and second contact
-            selected_points = self.select_contact_points(points_list, distances_list, 0, electrode.n_contacts, contact_length_mm, contact_gap_mm)
-            second_contact_point = selected_points[1]
-            n = np.where(points_list == second_contact_point)[0][0]
+            # get number of points between the first and the fifth contact
+            selected_points = self.select_contact_points(electrode.curve_points, electrode.curve_cumulative_distances, 0, electrode.n_contacts, contact_length_mm, contact_gap_mm)
+            fifth_contact_point = selected_points[4]
+            n = np.where(electrode.curve_points == fifth_contact_point)[0][0]
 
-            points_best_fit = None
             best_fit = 0
             for offset in range(n):
                 slicer.app.processEvents()
 
                 # select points from the fitted curve
-                selected_points = self.select_contact_points(points_list, distances_list, offset, electrode.n_contacts, contact_length_mm, contact_gap_mm)
+                selected_points = self.select_contact_points(electrode.curve_points, electrode.curve_cumulative_distances, offset, electrode.n_contacts, contact_length_mm, contact_gap_mm)
                 gaussian_balls_volume = np.zeros(ct_array.shape)
 
                 # generate gaussian balls
@@ -492,17 +567,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 if correlation > best_fit:
                     best_fit = correlation
                     points_best_fit = selected_points
+                    electrode.curve_points_offset = offset
 
             # plot selected points
             for i, point in enumerate(points_best_fit):
                 points_best_fit[i] = self.IJK_to_RAS(point[::-1], inputCT)
-                if fiducials:
-                    markupsNode.AddControlPoint(points_best_fit[i], f"{electrode.label_prefix}{i+1}")
+                markupsNode.AddControlPoint(points_best_fit[i], f"{electrode.label_prefix}{i+1}")
 
-            if not fiducials:
-                curveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode")
-                slicer.util.updateMarkupsControlPointsFromArray(curveNode, points_best_fit)
-                curveNode.SetName(f"Electrode {electrode.label_prefix} curve")
+        return markupsNode
 
     def eletrode_segmentation(self,
                               inputCT: vtkMRMLScalarVolumeNode, 
@@ -607,15 +679,14 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 pca_v_ijk = -pca_v_ijk
 
             # entry point of the electrode is a projection of the tip of the bolt to the bolt axis
-            w = np.array(self.RAS_to_IJK(electrode.bolt_tip_ras, inputCT))[::-1] - np.array(pca_centroid_ijk)
+            w = self.RAS_to_IJK(electrode.bolt_tip_ras, inputCT)[::-1] - pca_centroid_ijk
             t = np.dot(w, pca_v_ijk)
-            electrode.entry_point_ijk = np.array(pca_centroid_ijk) + t * pca_v_ijk
+            electrode.entry_point_ijk = pca_centroid_ijk + t * pca_v_ijk
 
             # compute offset of the electrode tip in direction of the bolt
-            bolt_axis_mm = inputCT.GetSpacing()[::-1] * pca_v_ijk
-            bolt_vector_mm_unit = bolt_axis_mm / np.linalg.norm(bolt_axis_mm)
-            offset_mm = bolt_vector_mm_unit * electrode.length_mm
-            offset_ijk = offset_mm / inputCT.GetSpacing()[::-1]
+            voxel_spacing = inputCT.GetSpacing()[::-1]
+            norm_factor = np.linalg.norm(voxel_spacing * pca_v_ijk) # length of the PCA unit vector in mm
+            offset_ijk = (pca_v_ijk * electrode.length_mm) / norm_factor
 
             electrode.tip_ijk = electrode.entry_point_ijk + offset_ijk
 
@@ -730,30 +801,31 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
     def select_contact_points(self,
                               points: np.array,
-                              distances: np.array,
+                              cumulative_distances: np.array,
                               n_offset: int,
                               n_contacts: int,
                               contact_length_mm: float,
-                              contact_gap_mm: float) -> np.array:
-        cumulative = np.cumsum(distances[n_offset:])
-        target_distances = np.arange(n_contacts) * (contact_length_mm + contact_gap_mm)
+                              contact_gap_mm: float,
+                              step: int = 0) -> np.array:
+        offset_distance = cumulative_distances[n_offset]
+        target_distances = offset_distance + np.arange(n_contacts) * (contact_length_mm + contact_gap_mm) + step * (contact_length_mm + contact_gap_mm)
 
         chosen_idx = []
         for t in target_distances:
             # insertion point where cumulative >= t
-            idx = np.searchsorted(cumulative, t)
+            idx = np.searchsorted(cumulative_distances, t)
 
             if idx == 0:
                 best = 0 # handle out‑of‑range cases
-            elif idx == len(cumulative):
+            elif idx == len(cumulative_distances):
                 best = idx - 1
             else:
                 # choose nearer of the two neighbors
-                below = cumulative[idx - 1]
-                above = cumulative[idx]
+                below = cumulative_distances[idx - 1]
+                above = cumulative_distances[idx]
                 best = idx if abs(above - t) < abs(t - below) else idx - 1
 
-            chosen_idx.append(n_offset + best)
+            chosen_idx.append(best)
 
         return points[chosen_idx]
 
