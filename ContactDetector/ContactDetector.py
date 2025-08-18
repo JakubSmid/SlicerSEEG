@@ -206,8 +206,6 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.radioButtonRenderingSkull.connect("clicked(bool)", self.onRenderingSkullClicked)
         self.ui.radioButtonRenderingDisabled.connect("clicked(bool)", self.onRenderingDisabledClicked)
 
-        self.ui.buttonSkullStripping.connect("clicked(bool)", self.onSkullStrippingClicked)
-
         self.ui.buttonBoltSegmentation.connect("clicked(bool)", self.onBoltSegmentationClicked)
         self.ui.buttonBoltAxisEst.connect("clicked(bool)", self.onBoltAxisEstClicked)
         self.ui.buttonElectrodeSegmentation.connect("clicked(bool)", self.onElectrodeSegmentationClicked)
@@ -308,18 +306,6 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         add_segmentation = self.ui.checkBoxBoltSegmentation.isChecked()
         with slicer.util.WaitCursor():
             self.logic.bolt_segmentation(self._parameterNode.inputCT, self.electrodes, self.ui.boltSphereRadius.value, self.ui.metalThreshold.value, add_segmentation)
-    
-    def onSkullStrippingClicked(self):
-        if self._parameterNode.inputT1 is None:
-            slicer.util.errorDisplay("Please select a T1 volume first.")
-            return
-        if self._parameterNode.brainMask is not None:
-            slicer.util.errorDisplay("You have already selected a brain mask. Select None brain mask in the input section if you want to create a new one.")
-            return
-
-        with slicer.util.WaitCursor():
-            segmentationNode = self.logic.skull_stripping(self._parameterNode.inputT1, self.ui.threshold.value)
-            self._parameterNode.brainMask = segmentationNode
 
     def onRenderingBoltsClicked(self):
         if self._parameterNode.inputCT is None:
@@ -331,7 +317,6 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         range = self._parameterNode.inputCT.GetImageData().GetScalarRange()
 
         scalarOpacity = displayNode.GetVolumePropertyNode().GetScalarOpacity()
-
         scalarOpacity.RemoveAllPoints()
         scalarOpacity.AddPoint(self.ui.metalThreshold.value, 0.0)
         scalarOpacity.AddPoint(self.ui.metalThreshold.value+0.1, 1.0)
@@ -455,15 +440,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         # precompute gaussian ball
         sigma_mm = contact_diameter_mm
         sigma_ijk = sigma_mm / np.array(inputCT.GetSpacing())[::-1]
-        ball_shape = (blob_size_sigma * sigma_ijk).astype(int) # blob_size_sigma defines size of the gaussian ball in sigmas
-        
-        # ensure odd shape
-        if ball_shape[0] % 2 == 0:
-            ball_shape[0] += 1
-        if ball_shape[1] % 2 == 0:
-            ball_shape[1] += 1
-        if ball_shape[2] % 2 == 0:
-            ball_shape[2] += 1
+        ball_shape = np.ceil(blob_size_sigma * sigma_ijk).astype(int) # blob_size_sigma defines size of the gaussian ball in sigmas
+
+        ball_shape += ball_shape % 2 == 0 # make sure the shape is odd
 
         ball_radius = ball_shape // 2
         gaussian_ball = self.gaussian_ball(ball_shape, sigma_ijk)
@@ -519,7 +498,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             fifth_contact_point = selected_points[4]
             n = np.where(electrode.curve_points == fifth_contact_point)[0][0]
 
-            best_fit = 0
+            best_fit = -np.inf
+            best_gaussian = None
             for offset in range(n):
                 slicer.app.processEvents()
 
@@ -535,21 +515,25 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
                     # clip to image boundaries
                     min_vol = np.maximum(min_voxel, 0)
-                    max_vol = np.minimum(max_voxel, gaussian_balls_volume.shape)
+                    max_vol = np.minimum(max_voxel, ct_array.shape)
 
-                    mask_start = min_vol - min_voxel
-                    mask_end = max_vol - min_voxel
+                    ball_start = min_vol - min_voxel
+                    ball_end = max_vol - min_voxel
 
                     gaussian_balls_volume[
                         min_vol[0]:max_vol[0],
                         min_vol[1]:max_vol[1],
-                        min_vol[2]:max_vol[2]] += gaussian_ball[mask_start[0]:mask_end[0],
-                                                                mask_start[1]:mask_end[1],
-                                                                mask_start[2]:mask_end[2]]
+                        min_vol[2]:max_vol[2]] += gaussian_ball[ball_start[0]:ball_end[0],
+                                                                ball_start[1]:ball_end[1],
+                                                                ball_start[2]:ball_end[2]]
+
+                # find absolute bounding box
+                min_voxel = np.round(selected_points.min(axis=0) - ball_radius).astype(int)
+                max_voxel = np.round(selected_points.max(axis=0) + ball_radius + 1).astype(int)
 
                 # bounding box
-                bbox_min = np.maximum(np.floor(selected_points.min(axis=0) - ball_radius), 0).astype(int)
-                bbox_max = np.minimum(np.ceil(selected_points.max(axis=0) + ball_radius + 1), gaussian_balls_volume.shape).astype(int)
+                bbox_min = np.maximum(min_voxel, 0)
+                bbox_max = np.minimum(max_voxel, gaussian_balls_volume.shape)
 
                 # crop region
                 gbv_crop = gaussian_balls_volume[bbox_min[0]:bbox_max[0],
@@ -568,6 +552,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                     best_fit = correlation
                     points_best_fit = selected_points
                     electrode.curve_points_offset = offset
+                    best_gaussian = gaussian_balls_volume
+
+            volumeNode = slicer.modules.volumes.logic().CloneVolume(slicer.mrmlScene, inputCT, "gaussian_balls_volume")
+            slicer.util.updateVolumeFromArray(volumeNode, best_gaussian)
 
             # plot selected points
             for i, point in enumerate(points_best_fit):
@@ -600,7 +588,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         # include bolt area
         for electrode in electrodes:
             slicer.app.processEvents()
-            i,j,k = electrode.bolt_mask_indices_ijk.T
+            i,j,k = electrode.bolt_segmentation_indices_ijk.T
             ct_array[i,j,k] = slicer.util.arrayFromVolume(inputCT)[i,j,k]
 
         # prepare GMM
@@ -668,7 +656,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             
             # find the best fit line for the electrode
             pca = PCA(n_components=1)
-            pca.fit(electrode.bolt_mask_indices_ijk)
+            pca.fit(electrode.bolt_segmentation_indices_ijk)
             pca_v_ijk = pca.components_[0]
             pca_centroid_ijk = pca.mean_
 
@@ -713,8 +701,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         # prepare data array
         ct_array = slicer.util.arrayFromVolume(inputCT)
 
-        # create a sphere with radius 10 voxels
-        spherical_mask = self.create_spherical_mask(np.array(inputCT.GetSpacing()), sphere_radius_mm)
+        # create a spherical mask
+        spherical_mask = self.create_spherical_mask(np.array(inputCT.GetSpacing())[::-1], sphere_radius_mm)
 
         if add_segmentation:
             segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
@@ -732,37 +720,37 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             max_voxel = np.round(bolt_tip_ijk + sphere_center + 1).astype(int)
 
             # clip to image boundaries
-            min_idx = np.maximum(min_voxel, 0)
-            max_idx = np.minimum(max_voxel, ct_array.shape)
+            min_vol = np.maximum(min_voxel, 0)
+            max_vol = np.minimum(max_voxel, ct_array.shape)
 
-            mask_start = min_idx - min_voxel
-            mask_end = mask_start + (max_idx - min_idx)
+            mask_start = min_vol - min_voxel
+            mask_end = max_vol - min_voxel
 
             # apply sphere
-            bolt_mask= spherical_mask.copy()
+            bolt_segmentation = spherical_mask[mask_start[0]:mask_end[0],
+                                               mask_start[1]:mask_end[1],
+                                               mask_start[2]:mask_end[2]].copy()
             
             # threshold metal
-            ct_crop = ct_array[min_idx[0]:max_idx[0],
-                               min_idx[1]:max_idx[1],
-                               min_idx[2]:max_idx[2]]
-            bolt_mask[ct_crop < metal_threshold] = 0
+            ct_crop = ct_array[min_vol[0]:max_vol[0],
+                               min_vol[1]:max_vol[1],
+                               min_vol[2]:max_vol[2]]
+            bolt_segmentation[ct_crop < metal_threshold] = 0
 
             # find the largest connected component (full connectivity)
-            labels = skimage.measure.label(bolt_mask)
+            labels = skimage.measure.label(bolt_segmentation)
             counts = np.bincount(labels.ravel())
             largest_label = np.argmax(counts[1:]) + 1
-            bolt_mask[labels != largest_label] = 0
+            bolt_segmentation[labels != largest_label] = 0
 
             # save mask
-            electrode.bolt_mask_indices_ijk = np.array(np.nonzero(bolt_mask)).T + min_idx
+            electrode.bolt_segmentation_indices_ijk = np.array(np.nonzero(bolt_segmentation)).T + min_vol
 
             if add_segmentation:
                 bolt_segm = np.zeros(ct_array.shape, dtype=np.uint8)
-                bolt_segm[min_idx[0]:max_idx[0],
-                          min_idx[1]:max_idx[1],
-                          min_idx[2]:max_idx[2]] = bolt_mask[mask_start[0]:mask_end[0],
-                                                             mask_start[1]:mask_end[1],
-                                                             mask_start[2]:mask_end[2]]
+                bolt_segm[min_vol[0]:max_vol[0],
+                          min_vol[1]:max_vol[1],
+                          min_vol[2]:max_vol[2]] = bolt_segmentation
 
                 segmentId = segmentationNode.GetSegmentation().AddEmptySegment()
                 segmentationNode.GetSegmentation().GetSegment(segmentId).SetName(f"Bolt {electrode.label_prefix}")
@@ -815,15 +803,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             # insertion point where cumulative >= t
             idx = np.searchsorted(cumulative_distances, t)
 
-            if idx == 0:
-                best = 0 # handle out‑of‑range cases
-            elif idx == len(cumulative_distances):
-                best = idx - 1
-            else:
-                # choose nearer of the two neighbors
-                below = cumulative_distances[idx - 1]
-                above = cumulative_distances[idx]
-                best = idx if abs(above - t) < abs(t - below) else idx - 1
+            # choose nearer of the two neighbors
+            below = cumulative_distances[idx - 1]
+            above = cumulative_distances[idx]
+            best = idx if abs(above - t) < abs(t - below) else idx - 1
 
             chosen_idx.append(best)
 

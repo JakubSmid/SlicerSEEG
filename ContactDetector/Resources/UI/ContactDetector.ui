@@ -16,7 +16,14 @@
      <property name="text">
       <string>Inputs</string>
      </property>
-     <layout class="QFormLayout" name="formLayout_2">
+     <layout class="QFormLayout" name="formLayout_3">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_6">
+        <property name="text">
+         <string>Input CT:</string>
+        </property>
+       </widget>
+      </item>
       <item row="0" column="1">
        <widget class="qMRMLNodeComboBox" name="inputSelectorCT">
         <property name="nodeTypes">
@@ -41,52 +48,14 @@
         </property>
        </widget>
       </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_6">
-        <property name="text">
-         <string>Input CT:</string>
-        </property>
-       </widget>
-      </item>
       <item row="1" column="0">
-       <widget class="QLabel" name="label_5">
-        <property name="text">
-         <string>T1 for masking:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="qMRMLNodeComboBox" name="inputSelectorT1">
-        <property name="nodeTypes">
-         <stringlist notr="true">
-          <string>vtkMRMLScalarVolumeNode</string>
-         </stringlist>
-        </property>
-        <property name="hideChildNodeTypes">
-         <stringlist notr="true"/>
-        </property>
-        <property name="noneEnabled">
-         <bool>true</bool>
-        </property>
-        <property name="addEnabled">
-         <bool>false</bool>
-        </property>
-        <property name="interactionNodeSingletonTag">
-         <string notr="true"/>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string>inputT1</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
          <string>Brain mask:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="1" column="1">
        <widget class="qMRMLNodeComboBox" name="inputSelectorBrainMask">
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -110,14 +79,14 @@
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_8">
         <property name="text">
          <string>Bolt fiducials:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="2" column="1">
        <widget class="qMRMLNodeComboBox" name="boltMarkupsSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -138,6 +107,96 @@
         </property>
         <property name="SlicerParameterName" stdset="0">
          <string>boltFiducials</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="SkullStripping">
+     <property name="text">
+      <string>Skull Stripping</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <layout class="QFormLayout" name="formLayout_2">
+        <item row="0" column="1">
+         <widget class="qMRMLNodeComboBox" name="inputSelectorT1">
+          <property name="nodeTypes">
+           <stringlist notr="true">
+            <string>vtkMRMLScalarVolumeNode</string>
+           </stringlist>
+          </property>
+          <property name="hideChildNodeTypes">
+           <stringlist notr="true"/>
+          </property>
+          <property name="noneEnabled">
+           <bool>true</bool>
+          </property>
+          <property name="addEnabled">
+           <bool>false</bool>
+          </property>
+          <property name="interactionNodeSingletonTag">
+           <string notr="true"/>
+          </property>
+          <property name="SlicerParameterName" stdset="0">
+           <string>inputT1</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_5">
+          <property name="text">
+           <string>T1 for masking:</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPushButton" name="buttonSkullStripping">
+        <property name="text">
+         <string>Create brain mask</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="Rendering3D">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="text">
+      <string>3D Rendering</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout_3">
+      <item>
+       <widget class="QRadioButton" name="radioButtonRenderingDisabled">
+        <property name="text">
+         <string>Disabled</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="radioButtonRenderingSkull">
+        <property name="text">
+         <string>Skull</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="radioButtonRenderingBolts">
+        <property name="text">
+         <string>Bolts</string>
         </property>
        </widget>
       </item>
@@ -271,105 +330,11 @@
     </widget>
    </item>
    <item>
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton_3">
+    <widget class="ctkCollapsibleButton" name="Debug">
      <property name="text">
-      <string>3D Rendering</string>
-     </property>
-     <property name="collapsed">
-      <bool>true</bool>
-     </property>
-     <layout class="QHBoxLayout" name="horizontalLayout_3">
-      <item>
-       <widget class="QRadioButton" name="radioButtonRenderingDisabled">
-        <property name="text">
-         <string>Disabled</string>
-        </property>
-        <property name="checked">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QRadioButton" name="radioButtonRenderingSkull">
-        <property name="text">
-         <string>Skull</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QRadioButton" name="radioButtonRenderingBolts">
-        <property name="text">
-         <string>Bolts</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton_4">
-     <property name="text">
-      <string>Skull-stripping</string>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_2">
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-        <item>
-         <widget class="QLabel" name="label_11">
-          <property name="text">
-           <string>Threshold:</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QSpinBox" name="threshold">
-          <property name="maximum">
-           <number>99999</number>
-          </property>
-          <property name="value">
-           <number>100</number>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <widget class="QPushButton" name="buttonSkullStripping">
-        <property name="text">
-         <string>Create new segmentation</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton">
-     <property name="text">
-      <string>Step by step</string>
+      <string>Debug</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2" columnstretch="1,0">
-      <item row="10" column="0">
-       <widget class="QPushButton" name="buttonBoltAxisEst">
-        <property name="text">
-         <string>Bolt axis estimation</string>
-        </property>
-       </widget>
-      </item>
-      <item row="12" column="0">
-       <widget class="QPushButton" name="buttonCurveFitting">
-        <property name="text">
-         <string>Curve fitting</string>
-        </property>
-       </widget>
-      </item>
-      <item row="8" column="0">
-       <widget class="QPushButton" name="buttonBoltSegmentation">
-        <property name="text">
-         <string>Bolt segmentation</string>
-        </property>
-       </widget>
-      </item>
       <item row="10" column="1">
        <widget class="QCheckBox" name="checkBoxLinearApproximation">
         <property name="text">
@@ -388,6 +353,27 @@
        <widget class="QPushButton" name="buttonElectrodeSegmentation">
         <property name="text">
          <string>Electrode segmentation (GMM)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="0">
+       <widget class="QPushButton" name="buttonBoltSegmentation">
+        <property name="text">
+         <string>Bolt segmentation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="10" column="0">
+       <widget class="QPushButton" name="buttonBoltAxisEst">
+        <property name="text">
+         <string>Bolt axis estimation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="12" column="0">
+       <widget class="QPushButton" name="buttonCurveFitting">
+        <property name="text">
+         <string>Curve fitting</string>
         </property>
        </widget>
       </item>
@@ -474,7 +460,10 @@
     </spacer>
    </item>
    <item>
-    <widget class="QPushButton" name="pushButton">
+    <widget class="QPushButton" name="buttonRun">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="minimumSize">
       <size>
        <width>0</width>
@@ -482,7 +471,7 @@
       </size>
      </property>
      <property name="text">
-      <string>Run all</string>
+      <string>Run</string>
      </property>
     </widget>
    </item>
