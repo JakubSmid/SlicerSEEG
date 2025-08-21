@@ -110,12 +110,6 @@ def registerSampleData():
 class ContactDetectorParameterNode:
     """
     The parameters needed by module.
-
-    inputVolume - The volume to threshold.
-    imageThreshold - The value at which to threshold the input volume.
-    invertThreshold - If true, will invert the threshold.
-    thresholdedVolume - The output volume that will contain the thresholded volume.
-    invertedVolume - The output volume that will contain the inverted thresholded volume.
     """
 
     inputCT: vtkMRMLScalarVolumeNode
@@ -123,6 +117,18 @@ class ContactDetectorParameterNode:
     brainMask: vtkMRMLSegmentationNode
     boltFiducials: vtkMRMLMarkupsFiducialNode
 
+    metalThreshold_HU: Annotated[float, WithinRange(0, 9999999)] = 3000
+    contactLength_mm: Annotated[float, WithinRange(0.1, 100)] = 2
+    contactGap_mm: Annotated[float, WithinRange(0.1, 100)] = 1.5
+    contactDiameter_mm: Annotated[float, WithinRange(0.1, 100)] = 0.8
+    boltSphereRadius_mm: Annotated[float, WithinRange(0.1, 100)] = 10
+    blobSize_sigma: Annotated[float, WithinRange(0.1, 100)] = 3
+
+    # developerMode
+    boltSegmentation: bool
+    linearApproximation: bool
+    electrodeSegmentation: bool
+    gaussianBalls: bool
 
 class Electrode():
     def __init__(self, bolt_tip_ras, label, contact_length_mm, contact_gap_mm):
@@ -164,10 +170,12 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.logic = None
         self._parameterNode = None
         self._parameterNodeGuiTag = None
+        self.lastSelectedBoltFiducials = None
 
         self.electrodes: list[Electrode] = []
         self.selected_electrode = None
         self.selected_markup_index = None
+        self.result_markup_node = None
 
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
@@ -184,6 +192,9 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # "setMRMLScene(vtkMRMLScene*)" slot.
         uiWidget.setMRMLScene(slicer.mrmlScene)
 
+        if self.developerMode == False:
+            self.ui.collapsibleButtonDebug.setVisible(False)
+
         self.ui.shiftFiducialsWidget.setVisible(False)
 
         # Create logic class. Logic implements all computations that should be possible to run
@@ -192,20 +203,19 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Connections
 
-        # These connections ensure that we update parameter node when scene is closed
-        # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
-        # self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
-        self.ui.inputSelectorCT.connect('currentNodeChanged(vtkMRMLNode*)', self.onInputSelectorCTChanged)
-        self.ui.SimpleMarkupsWidget.connect('currentMarkupsControlPointSelectionChanged(int)', self.onCurrentMarkupsControlPointSelectionChanged)
-        self.ui.SimpleMarkupsWidget.connect('markupsNodeChanged()', self.onMarkupsNodeChanged)
-        self.ui.shiftElectrodeSpinBox.connect('valueChanged(int)', self.onShiftElectrodeSpinBoxChanged)
+        self.ui.comboBoxCT.connect('currentNodeChanged(vtkMRMLNode*)', self.onComboBoxCTChanged)
+        self.ui.SimpleMarkupsWidgetEstimatedContacts.connect('currentMarkupsControlPointSelectionChanged(int)', self.onMarkupsWidgetEstimatedContactsSelectionChanged)
+        self.ui.SimpleMarkupsWidgetEstimatedContacts.connect('markupsNodeChanged()', self.onMarkupsWidgetEstimatedContactsMarkupsNodeChanged)
+        self.ui.spinBoxShiftElectrode.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeChanged)
 
         # Buttons
-        # self.ui.applyButton.connect("clicked(bool)", self.onApplyButton)
-        self.ui.radioButtonRenderingBolts.connect("clicked(bool)", self.onRenderingBoltsClicked)
-        self.ui.radioButtonRenderingSkull.connect("clicked(bool)", self.onRenderingSkullClicked)
+        self.ui.buttonDisplayCT.connect("clicked(bool)", self.onDisplayCTClicked)
+
+        self.ui.radioButtonRenderingMetal.connect("clicked(bool)", self.onRenderingMetalClicked)
+        self.ui.radioButtonRenderingHead.connect("clicked(bool)", self.onRenderingHeadClicked)
         self.ui.radioButtonRenderingDisabled.connect("clicked(bool)", self.onRenderingDisabledClicked)
 
+        # developerMode
         self.ui.buttonBoltSegmentation.connect("clicked(bool)", self.onBoltSegmentationClicked)
         self.ui.buttonBoltAxisEst.connect("clicked(bool)", self.onBoltAxisEstClicked)
         self.ui.buttonElectrodeSegmentation.connect("clicked(bool)", self.onElectrodeSegmentationClicked)
@@ -214,8 +224,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
 
-    def onShiftElectrodeSpinBoxChanged(self, spin_box_value):
-        fiducial_node = self.ui.SimpleMarkupsWidget.currentNode()
+    def onSpinBoxShiftElectrodeChanged(self, spin_box_value):
+        fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         self.selected_electrode.shift_fiducials_value = spin_box_value
 
         # get fiducials list
@@ -228,8 +238,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                                                            self.selected_electrode.curve_cumulative_distances,
                                                            self.selected_electrode.curve_points_offset,
                                                            self.selected_electrode.n_contacts,
-                                                           self.ui.contactLength.value,
-                                                           self.ui.contactGap.value,
+                                                           self._parameterNode.contactLength_mm,
+                                                           self._parameterNode.contactGap_mm,
                                                            spin_box_value)
 
         # pause rendering while changing fiducial positions
@@ -240,11 +250,11 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                     fiducial_node.SetNthControlPointPosition(fiducial_idx[i], selected_points[i])
 
             # jump slices to updated fiducials
-            slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(fiducial_node.GetID(), self.selected_markup_index, True)
+            # slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(fiducial_node.GetID(), self.selected_markup_index, True)
 
 
-    def onCurrentMarkupsControlPointSelectionChanged(self, markupIndex):
-        fiducial_node = self.ui.SimpleMarkupsWidget.currentNode()
+    def onMarkupsWidgetEstimatedContactsSelectionChanged(self, markupIndex):
+        fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         selected_label = fiducial_node.GetNthControlPointLabel(markupIndex)
         self.selected_markup_index = markupIndex
 
@@ -252,47 +262,57 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         for electrode in self.electrodes:
             if selected_label.startswith(electrode.label_prefix):
                 self.selected_electrode = electrode
-                self.ui.shiftElectrodeLabel.setText(f"Shift {electrode.label_prefix} fiducials:")
+                self.ui.labelShiftElectrode.setText(f"Shift {electrode.label_prefix} fiducials:")
 
-                self.ui.shiftElectrodeSpinBox.disconnect('valueChanged(int)')
-                self.ui.shiftElectrodeSpinBox.setValue(electrode.shift_fiducials_value)
-                self.ui.shiftElectrodeSpinBox.connect('valueChanged(int)', self.onShiftElectrodeSpinBoxChanged)
+                self.ui.spinBoxShiftElectrode.disconnect('valueChanged(int)')
+                self.ui.spinBoxShiftElectrode.setValue(electrode.shift_fiducials_value)
+                self.ui.spinBoxShiftElectrode.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeChanged)
                 break
 
-    def onMarkupsNodeChanged(self):
-        # check for invalid markup node in the list
-        if self.ui.SimpleMarkupsWidget.currentNode() is None or self.ui.SimpleMarkupsWidget.currentNode().GetName() != "Electrodes":
+    def onMarkupsWidgetEstimatedContactsMarkupsNodeChanged(self):
+        # check for invalid markup node in the list (result markup node has been probably deleted)
+        if self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode() is not self.result_markup_node:
             self.ui.shiftFiducialsWidget.setVisible(False)
+            self.ui.SimpleMarkupsWidgetEstimatedContacts.setCurrentNode(None)
+            self.result_markup_node = None
 
     def onCurveFittingClicked(self):
         with slicer.util.WaitCursor():
-            markupsNode = self.logic.curve_fitting(self._parameterNode.inputCT,
-                                                   self.electrodes,
-                                                   self.ui.boltSphereRadius.value,
-                                                   self.ui.blobSize.value,
-                                                   self.ui.contactDiameter.value,
-                                                   self.ui.contactLength.value,
-                                                   self.ui.contactGap.value)
-        # show markupsNode in the list widget
-        self.ui.SimpleMarkupsWidget.setCurrentNode(markupsNode)
+            self.result_markup_node = self.logic.curve_fitting(self._parameterNode.inputCT,
+                                                             self.electrodes,
+                                                             self._parameterNode.boltSphereRadius_mm,
+                                                             self._parameterNode.blobSize_sigma,
+                                                             self._parameterNode.contactDiameter_mm,
+                                                             self._parameterNode.contactLength_mm,
+                                                             self._parameterNode.contactGap_mm,
+                                                             self._parameterNode.gaussianBalls)
         
-        # highlight the first control point
-        self.ui.SimpleMarkupsWidget.setJumpToSliceEnabled(False)
-        self.ui.SimpleMarkupsWidget.highlightNthControlPoint(0)
-        self.ui.SimpleMarkupsWidget.setJumpToSliceEnabled(True)
-
-        # make list widget visible
+        # collapse collapsibleButtonInputBoltFiducials and make visible output collapsible button
+        self.ui.collapsibleButtonInputBoltFiducials.collapsed = True
+        self.ui.collapsibleButtonEstimatedContacts.collapsed = False
         self.ui.shiftFiducialsWidget.setVisible(True)
 
+        # show markupsNode in the list widget
+        self.ui.SimpleMarkupsWidgetEstimatedContacts.setCurrentNode(self.result_markup_node)
+        
+        # highlight the first control point
+        self.ui.SimpleMarkupsWidgetEstimatedContacts.setJumpToSliceEnabled(False)
+        self.ui.SimpleMarkupsWidgetEstimatedContacts.highlightNthControlPoint(0)
+        self.ui.SimpleMarkupsWidgetEstimatedContacts.setJumpToSliceEnabled(True)
+
     def onElectrodeSegmentationClicked(self):
-        add_segmentation = self.ui.checkBoxElectrodeSegmentation.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.eletrode_segmentation(self._parameterNode.inputCT, self._parameterNode.brainMask, self.electrodes, self.ui.metalThreshold.value, add_segmentation)
+            self.logic.eletrode_segmentation(self._parameterNode.inputCT,
+                                             self._parameterNode.brainMask,
+                                             self.electrodes,
+                                             self._parameterNode.metalThreshold_HU,
+                                             self._parameterNode.electrodeSegmentation)
 
     def onBoltAxisEstClicked(self):
-        add_line = self.ui.checkBoxLinearApproximation.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.bolt_axis_estimation(self._parameterNode.inputCT, self.electrodes, add_line)
+            self.logic.bolt_axis_estimation(self._parameterNode.inputCT,
+                                            self.electrodes,
+                                            self._parameterNode.linearApproximation)
 
     def onBoltSegmentationClicked(self):
         # load electrodes
@@ -300,36 +320,38 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         for i in range(self._parameterNode.boltFiducials.GetNumberOfControlPoints()):
             bolt_tip_ras = [0, 0, 0]
             self._parameterNode.boltFiducials.GetNthControlPointPosition(i, bolt_tip_ras)
-            self.electrodes.append(Electrode(bolt_tip_ras, self._parameterNode.boltFiducials.GetNthControlPointLabel(i), self.ui.contactLength.value, self.ui.contactGap.value))
+            self.electrodes.append(Electrode(bolt_tip_ras, self._parameterNode.boltFiducials.GetNthControlPointLabel(i), self._parameterNode.contactLength_mm, self._parameterNode.contactGap_mm))
 
         # segment bolts
-        add_segmentation = self.ui.checkBoxBoltSegmentation.isChecked()
         with slicer.util.WaitCursor():
-            self.logic.bolt_segmentation(self._parameterNode.inputCT, self.electrodes, self.ui.boltSphereRadius.value, self.ui.metalThreshold.value, add_segmentation)
+            self.logic.bolt_segmentation(self._parameterNode.inputCT,
+                                         self.electrodes,
+                                         self._parameterNode.boltSphereRadius_mm,
+                                         self._parameterNode.metalThreshold_HU,
+                                         self._parameterNode.boltSegmentation)
 
-    def onRenderingBoltsClicked(self):
-        if self._parameterNode.inputCT is None:
-            slicer.util.errorDisplay("Please select a CT volume first.")
-            self.ui.radioButtonRenderingDisabled.setChecked(True)
-            return
-
-        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+    def onRenderingMetalClicked(self):
+        displayNode = slicer.modules.volumerendering.logic().GetFirstVolumeRenderingDisplayNode(self._parameterNode.inputCT)
+        if displayNode is None:
+            displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
         range = self._parameterNode.inputCT.GetImageData().GetScalarRange()
 
         scalarOpacity = displayNode.GetVolumePropertyNode().GetScalarOpacity()
         scalarOpacity.RemoveAllPoints()
-        scalarOpacity.AddPoint(self.ui.metalThreshold.value, 0.0)
-        scalarOpacity.AddPoint(self.ui.metalThreshold.value+0.1, 1.0)
+        scalarOpacity.AddPoint(self._parameterNode.metalThreshold_HU, 0.0)
+        scalarOpacity.AddPoint(self._parameterNode.metalThreshold_HU + 2, 1.0)
+        """
+        +2 to suppress warning:
+        Warning: In vtkOpenGLVolumeLookupTable.cxx, line 88
+        vtkOpenGLVolumeOpacityTable (0x7484f61ffc80): This OpenGL implementation does not support the required texture size of 65536, falling back to maximum allowed, 32768.This may cause an incorrect lookup table mapping.
+        """
         scalarOpacity.AddPoint(range[1], 1.0)
         displayNode.SetVisibility(True)
 
-    def onRenderingSkullClicked(self):
-        if self._parameterNode.inputCT is None:
-            slicer.util.errorDisplay("Please select a CT volume first.")
-            self.ui.radioButtonRenderingDisabled.setChecked(True)
-            return
-
-        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+    def onRenderingHeadClicked(self):
+        displayNode = slicer.modules.volumerendering.logic().GetFirstVolumeRenderingDisplayNode(self._parameterNode.inputCT)
+        if displayNode is None:
+            displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
         range = self._parameterNode.inputCT.GetImageData().GetScalarRange()
 
         scalarOpacity = displayNode.GetVolumePropertyNode().GetScalarOpacity()
@@ -339,15 +361,92 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         displayNode.SetVisibility(True)
 
     def onRenderingDisabledClicked(self):
-        displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
-        displayNode.SetVisibility(False)
-
-    def onInputSelectorCTChanged(self):
-        if self._parameterNode.inputCT is not None:
-            # disable rendering for the new CT
-            displayNode = slicer.modules.volumerendering.logic().CreateDefaultVolumeRenderingNodes(self._parameterNode.inputCT)
+        displayNode = slicer.modules.volumerendering.logic().GetFirstVolumeRenderingDisplayNode(self._parameterNode.inputCT)
+        if displayNode is not None:
             displayNode.SetVisibility(False)
+
+    def onComboBoxCTChanged(self):
+        # disable rendering for the new CT
+        if self._parameterNode.inputCT is not None:
+            self.onRenderingDisabledClicked()
             self.ui.radioButtonRenderingDisabled.setChecked(True)
+
+    def onDisplayCTClicked(self):
+        slicer.util.setSliceViewerLayers(background = self._parameterNode.inputCT)
+        slicer.util.resetSliceViews()
+
+    def updateGUIFromParameterNode(self, caller, event):
+        # disable skull stripping button if T1 is not selected
+        if self._parameterNode.inputT1 is None:
+            self.ui.buttonCreateBrainMask.setEnabled(False)
+            self.ui.buttonCreateBrainMask.setToolTip("Missing T1 image")
+        else:
+            self.ui.buttonCreateBrainMask.setEnabled(True)
+            self.ui.buttonCreateBrainMask.setToolTip("")
+
+        # disable rendering buttons and slice views if CT is not selected
+        if self._parameterNode.inputCT is None:
+            self.ui.collapsibleButtonRendering.setEnabled(False)
+            self.ui.collapsibleButtonRendering.setToolTip("Missing CT image")
+
+            self.ui.buttonDisplayCT.setEnabled(False)
+            self.ui.buttonDisplayCT.setToolTip("Missing CT image")
+        else:
+            self.ui.collapsibleButtonRendering.setEnabled(True)
+            self.ui.collapsibleButtonRendering.setToolTip("")
+
+            self.ui.buttonDisplayCT.setEnabled(True)
+            self.ui.buttonDisplayCT.setToolTip("")
+
+        # disable run button if any input is missing
+        missing = []
+        if self._parameterNode.inputCT is None:
+            missing.append("CT")
+        if self._parameterNode.brainMask is None:
+            missing.append("brain mask")
+        if self._parameterNode.boltFiducials is None:
+            missing.append("bolt fiducials")
+
+        if missing:
+            self.ui.buttonRun.setEnabled(False)
+            self.ui.buttonRun.setToolTip(f"Missing input(s): {', '.join(missing)}")
+        else:
+            self.ui.buttonRun.setEnabled(True)
+            self.ui.buttonRun.setToolTip("")
+
+        # update markup widgets based on selected point list
+        self.ui.MarkupsPlaceWidget.setCurrentNode(self._parameterNode.boltFiducials)
+        self.ui.SimpleMarkupsWidgetInput.setCurrentNode(self._parameterNode.boltFiducials)
+
+        # add observer for changing control point label
+        if self.lastSelectedBoltFiducials is not None:
+            self.removeObserver(self.lastSelectedBoltFiducials, slicer.vtkMRMLMarkupsNode.PointAddedEvent, self.onControlPointAdded)
+
+        if self._parameterNode.boltFiducials is not None:
+            self.lastSelectedBoltFiducials = self._parameterNode.boltFiducials
+            self.addObserver(self.lastSelectedBoltFiducials, slicer.vtkMRMLMarkupsNode.PointAddedEvent, self.onControlPointAdded)
+            
+    @vtk.calldata_type(vtk.VTK_OBJECT)
+    def onNodeAdded(self, caller, event,  node):
+        # Eevery time a new node is added to the scene check if it's input node
+        if "ct" in node.GetName().lower() and isinstance(node, ContactDetectorParameterNode.__annotations__['inputCT']):
+            self._parameterNode.inputCT = node
+
+        if "t1" in node.GetName().lower() and isinstance(node, ContactDetectorParameterNode.__annotations__['inputT1']):
+            self._parameterNode.inputT1 = node
+    
+        if "fiducials" in node.GetName().lower() and isinstance(node, ContactDetectorParameterNode.__annotations__['boltFiducials']):
+            self._parameterNode.boltFiducials = node
+
+        if "mask" in node.GetName().lower() and isinstance(node, ContactDetectorParameterNode.__annotations__['brainMask']):
+            self._parameterNode.brainMask = node
+
+    def onControlPointAdded(self, caller, event):
+        # rename new control point as A-no, B-no, etc
+        if self.ui.MarkupsPlaceWidget.placeModeEnabled:
+            n = caller.GetNumberOfControlPoints()
+            label = f"{chr(ord('A') + n - 1)}-no"
+            caller.SetNthControlPointLabel(n-1, label)
 
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
@@ -364,7 +463,12 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self._parameterNode:
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
             self._parameterNodeGuiTag = None
-            # self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+
+            self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+            self.removeObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAddedEvent, self.onNodeAdded)
+            if self.hasObserver(self.lastSelectedBoltFiducials, slicer.vtkMRMLMarkupsNode.PointAddedEvent, self.onControlPointAdded):
+                self.removeObserver(self.lastSelectedBoltFiducials, slicer.vtkMRMLMarkupsNode.PointAddedEvent, self.onControlPointAdded)
+            self.lastSelectedBoltFiducials = None
 
     def initializeParameterNode(self) -> None:
         """Ensure parameter node exists and observed."""
@@ -374,10 +478,23 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.setParameterNode(self.logic.getParameterNode())
 
         # Select default input nodes if nothing is selected yet to save a few clicks for the user
-        # if not self._parameterNode.inputVolume:
-        #     firstVolumeNode = slicer.mrmlScene.GetFirstNodeByClass("vtkMRMLScalarVolumeNode")
-        #     if firstVolumeNode:
-        #         self._parameterNode.inputVolume = firstVolumeNode
+        if not self._parameterNode.inputCT:
+            volume_nodes = slicer.util.getNodesByClass(ContactDetectorParameterNode.__annotations__['inputCT'].__name__)
+            for node in volume_nodes:
+                if "ct" in node.GetName().lower():
+                    self._parameterNode.inputCT = node
+                if "t1" in node.GetName().lower():
+                    self._parameterNode.inputT1 = node
+            
+            fiducial_nodes = slicer.util.getNodesByClass(ContactDetectorParameterNode.__annotations__['boltFiducials'].__name__)
+            for node in fiducial_nodes:
+                if "fiducials" in node.GetName().lower():
+                    self._parameterNode.boltFiducials = node
+
+            mask_nodes = slicer.util.getNodesByClass(ContactDetectorParameterNode.__annotations__['brainMask'].__name__)
+            for node in mask_nodes:
+                if "mask" in node.GetName().lower():
+                    self._parameterNode.brainMask = node
 
     def setParameterNode(self, inputParameterNode: Optional[ContactDetectorParameterNode]) -> None:
         """
@@ -387,13 +504,23 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         if self._parameterNode:
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
-            # self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+
+            # remove observers from the old parameter node
+            if self.hasObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode):
+                self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+            if self.hasObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAddedEvent, self.onNodeAdded):
+                self.removeObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAddedEvent, self.onNodeAdded)
         self._parameterNode = inputParameterNode
         if self._parameterNode:
             # Note: in the .ui file, a Qt dynamic property called "SlicerParameterName" is set on each
             # ui element that needs connection.
             self._parameterNodeGuiTag = self._parameterNode.connectGui(self.ui)
-            # self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._checkCanApply)
+
+            # add observer for GUI changes
+            self.addObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self.updateGUIFromParameterNode)
+            self.addObserver(slicer.mrmlScene, slicer.vtkMRMLScene.NodeAddedEvent, self.onNodeAdded)
+
+            self.updateGUIFromParameterNode(None, None)
 
 
 #
@@ -425,7 +552,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             blob_size_sigma: float,
             contact_diameter_mm: float,
             contact_length_mm: float,
-            contact_gap_mm: float):
+            contact_gap_mm: float,
+            show_gaussian_balls: bool):
         # import or install dependencies
         try:
             from sklearn.decomposition import PCA
@@ -554,8 +682,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                     electrode.curve_points_offset = offset
                     best_gaussian = gaussian_balls_volume
 
-            volumeNode = slicer.modules.volumes.logic().CloneVolume(slicer.mrmlScene, inputCT, "gaussian_balls_volume")
-            slicer.util.updateVolumeFromArray(volumeNode, best_gaussian)
+            if show_gaussian_balls:
+                volumeNode = slicer.modules.volumes.logic().CloneVolume(slicer.mrmlScene, inputCT, f"Gaussian balls {electrode.label_prefix}")
+                slicer.util.updateVolumeFromArray(volumeNode, best_gaussian.astype(np.float32))
 
             # plot selected points
             for i, point in enumerate(points_best_fit):
@@ -755,23 +884,6 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 segmentId = segmentationNode.GetSegmentation().AddEmptySegment()
                 segmentationNode.GetSegmentation().GetSegment(segmentId).SetName(f"Bolt {electrode.label_prefix}")
                 slicer.util.updateSegmentBinaryLabelmapFromArray(bolt_segm, segmentationNode, segmentId)
-
-    def skull_stripping(self,
-                        inputT1: vtkMRMLScalarVolumeNode,
-                        threshold: float = 100) -> vtkMRMLSegmentationNode:
-        t1_array = slicer.util.arrayFromVolume(inputT1)
-        #t1_unique = np.unique(t1_array)
-
-        #p_low = np.percentile(t1_unique, percentile)
-        t1_mask = (t1_array > threshold).astype(np.uint8)
-
-        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
-        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(inputT1)
-        segmentationNode.CreateDefaultDisplayNodes()
-        segmentId = segmentationNode.GetSegmentation().AddEmptySegment()
-        slicer.util.updateSegmentBinaryLabelmapFromArray(t1_mask, segmentationNode, segmentId)
-
-        return segmentationNode
 
     def gaussian_ball(self,
                       shape: np.array,

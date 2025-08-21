@@ -5,9 +5,12 @@
 - [X] contact manual shifting
 - [x] use cropped array around the balls for the correlation for faster computation
 - [ ] CT bone reconstruction
-- [ ] auto load input based on input file name
+- [x] auto load input based on input file name
+- [x] fiducial placement
 - [ ] use tip of the electrode instead of the linear approximation
 - [ ] add micro step while electrode shifting
+- [x] new fiducial naming A-no, B-no
+- [x] disabled buttons tooltip hint
 
 # Visualization
 - [x] debug checkbox to enable visualization
@@ -22,7 +25,16 @@
 - [ ] fix error when extending the curve outside of the image / moving the electrode outside of the image
 
 # Finalization
+- [x] add parameters into the parameter node and check scene saving
 - [ ] remove step-by-step, add event on run all click
 - [ ] create tooltip help
 - [ ] add module description, help and acknowledgement
 - [ ] evaluate differences against GT
+- [ ] icon
+
+# Testing
+- [ ] prepare dataset
+- [ ] apply dummy affine transform
+- [ ] estimate bolt tip as extrapolation of the first and last contact and apply additional random translation away from the axis
+- [ ] evaluation script
+- [ ] batch loading (as a test function?)
