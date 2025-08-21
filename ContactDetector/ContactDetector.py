@@ -215,6 +215,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.radioButtonRenderingHead.connect("clicked(bool)", self.onRenderingHeadClicked)
         self.ui.radioButtonRenderingDisabled.connect("clicked(bool)", self.onRenderingDisabledClicked)
 
+        self.ui.buttonRun.connect("clicked(bool)", self.onRunClicked)
+
         # developerMode
         self.ui.buttonBoltSegmentation.connect("clicked(bool)", self.onBoltSegmentationClicked)
         self.ui.buttonBoltAxisEst.connect("clicked(bool)", self.onBoltAxisEstClicked)
@@ -223,6 +225,28 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
+
+    def onRunClicked(self):
+        progressbar = slicer.util.createProgressDialog(windowTitle="Detecting contacts")
+        progressbar.setCancelButton(None)
+
+        progressbar.labelText = "Loading input data and segmenting bolts..."
+        self.onBoltSegmentationClicked()
+
+        progressbar.value = 30
+        progressbar.labelText = "Estimating bolt axis..."
+        self.onBoltAxisEstClicked()
+
+        progressbar.value = 50
+        progressbar.labelText = "Segmenting electrodes (GMM)..."
+        self.onElectrodeSegmentationClicked()
+
+        progressbar.value = 70
+        progressbar.labelText = "Fitting curves and electrode models..."
+        self.onCurveFittingClicked()
+        
+        progressbar.labelText = "Done..."
+        progressbar.value = 100
 
     def onSpinBoxShiftElectrodeChanged(self, spin_box_value):
         fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()

@@ -26,7 +26,7 @@
 
 # Finalization
 - [x] add parameters into the parameter node and check scene saving
-- [ ] remove step-by-step, add event on run all click
+- [x] remove step-by-step, add event on run all click
 - [ ] create tooltip help
 - [ ] add module description, help and acknowledgement
 - [ ] evaluate differences against GT
