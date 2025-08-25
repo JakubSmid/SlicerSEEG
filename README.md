@@ -21,7 +21,7 @@
 - [x] test edge cases (bolt spheres around the edge of the image, gaussian balls around the edge of the image)
 - [x] check algorithm on non standard spacing
 - [x] fix memory leakage after deleting nodes from slicer
-- [ ] warning if there is no bolt around the input fiducial
+- [x] warning if there is no bolt around the input fiducial
 - [x] fix error when extending the curve outside of the image / moving the electrode outside of the image
 
 # Finalization

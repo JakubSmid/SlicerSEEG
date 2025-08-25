@@ -969,6 +969,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                                min_vol[2]:max_vol[2]]
             bolt_segmentation[ct_crop < metal_threshold] = 0
 
+            if not np.any(bolt_segmentation):
+                slicer.util.errorDisplay(f"Bolt segmentation for electrode {electrode.label_prefix} is empty. Try to check position of the bolt fiducial or consider increasing the sphere radius or decreasing the metal threshold.", windowTitle="Error")
+                raise ValueError(f"Bolt segmentation for electrode {electrode.label_prefix} is empty")
+
             # find the largest connected component (full connectivity)
             labels = skimage.measure.label(bolt_segmentation)
             counts = np.bincount(labels.ravel())
