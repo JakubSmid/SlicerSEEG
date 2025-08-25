@@ -22,7 +22,7 @@
 - [x] check algorithm on non standard spacing
 - [x] fix memory leakage after deleting nodes from slicer
 - [ ] warning if there is no bolt around the input fiducial
-- [ ] fix error when extending the curve outside of the image / moving the electrode outside of the image
+- [x] fix error when extending the curve outside of the image / moving the electrode outside of the image
 
 # Finalization
 - [x] add parameters into the parameter node and check scene saving
@@ -32,7 +32,7 @@
 - [ ] icon
 
 # Testing
-- [ ] prepare dataset
+- [x] prepare dataset
 - [ ] apply dummy affine transform
 - [ ] estimate bolt tip as extrapolation of the first and last contact and apply additional random translation away from the axis
 - [ ] evaluation script

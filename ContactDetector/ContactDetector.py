@@ -146,8 +146,10 @@ class Electrode():
 
         self.curve_points = None
         self.curve_cumulative_distances = None
-        self.curve_points_offset = None
+        self.curve_points_offset = 0
         self.shift_fiducials_value = 0
+
+        self.warn_out_of_range = False
     
     @staticmethod
     def split_label(electrode_name):
@@ -254,19 +256,20 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         self.selected_electrode.shift_fiducials_value = spin_box_value
 
+        selected_points = self.logic.select_contact_points(self.selected_electrode,
+                                                           self._parameterNode.contactLength_mm,
+                                                           self._parameterNode.contactGap_mm,
+                                                           self.selected_electrode.curve_points_offset)
+        
+        if self.selected_electrode.warn_out_of_range:
+            slicer.util.warningDisplay(f"Could not fit all contact points on electrode {self.selected_electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
+            self.selected_electrode.warn_out_of_range = False
+            
         # get fiducials list
         fiducial_idx = []
         for i in range(fiducial_node.GetNumberOfControlPoints()):
             if fiducial_node.GetNthControlPointLabel(i).startswith(self.selected_electrode.label_prefix):
                 fiducial_idx.append(i)
-
-        selected_points = self.logic.select_contact_points(self.selected_electrode.curve_points,
-                                                           self.selected_electrode.curve_cumulative_distances,
-                                                           self.selected_electrode.curve_points_offset,
-                                                           self.selected_electrode.n_contacts,
-                                                           self._parameterNode.contactLength_mm,
-                                                           self._parameterNode.contactGap_mm,
-                                                           spin_box_value)
 
         # pause rendering while changing fiducial positions
         with slicer.util.RenderBlocker():
@@ -701,7 +704,12 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             y_fit = np.polyval(coeffs_y, X)
             z_fit = np.polyval(coeffs_z, X)
 
+            # store curve points
             electrode.curve_points = np.column_stack((x_fit, y_fit, z_fit))
+            
+            # remove points that are outside of the image
+            in_image = np.all((electrode.curve_points >= 0) & (electrode.curve_points < np.array(ct_array.shape)), axis=1)
+            electrode.curve_points = electrode.curve_points[in_image]
 
             # compute distance between points on the curve
             diffs = np.diff(electrode.curve_points * inputCT.GetSpacing()[::-1], axis=0)
@@ -709,9 +717,12 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             electrode.curve_cumulative_distances = np.cumsum(curve_distances_between_points)
 
             # get number of points between the first and the fifth contact
-            selected_points = self.select_contact_points(electrode.curve_points, electrode.curve_cumulative_distances, 0, electrode.n_contacts, contact_length_mm, contact_gap_mm)
-            fifth_contact_point = selected_points[4]
-            n = np.where(electrode.curve_points == fifth_contact_point)[0][0]
+            if electrode.n_contacts > 4:
+                selected_points = self.select_contact_points(electrode, contact_length_mm, contact_gap_mm, 0)
+                fifth_contact_point = selected_points[4]
+                n = np.where(electrode.curve_points == fifth_contact_point)[0][0]
+            else:
+                n = len(electrode.curve_points)-1
 
             best_fit = -np.inf
             best_gaussian = None
@@ -719,7 +730,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                 slicer.app.processEvents()
 
                 # select points from the fitted curve
-                selected_points = self.select_contact_points(electrode.curve_points, electrode.curve_cumulative_distances, offset, electrode.n_contacts, contact_length_mm, contact_gap_mm)
+                selected_points = self.select_contact_points(electrode, contact_length_mm, contact_gap_mm, offset)
+
                 gaussian_balls_volume = np.zeros(ct_array.shape)
 
                 # generate gaussian balls
@@ -768,6 +780,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                     points_best_fit = selected_points
                     electrode.curve_points_offset = offset
                     best_gaussian = gaussian_balls_volume
+
+            if electrode.warn_out_of_range:
+                slicer.util.warningDisplay(f"Could not fit all contact points on electrode {electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
+                electrode.warn_out_of_range = False
 
             if show_gaussian_balls:
                 volumeNode = slicer.modules.volumes.logic().CloneVolume(slicer.mrmlScene, inputCT, f"Gaussian balls {electrode.label_prefix}")
@@ -987,29 +1003,30 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
         return gauss
 
     def select_contact_points(self,
-                              points: np.array,
-                              cumulative_distances: np.array,
-                              n_offset: int,
-                              n_contacts: int,
+                              electrode: Electrode,
                               contact_length_mm: float,
                               contact_gap_mm: float,
-                              step: int = 0) -> np.array:
-        offset_distance = cumulative_distances[n_offset]
-        target_distances = offset_distance + np.arange(n_contacts) * (contact_length_mm + contact_gap_mm) + step * (contact_length_mm + contact_gap_mm)
+                              offset: float) -> np.array:
+        offset_distance = electrode.curve_cumulative_distances[offset]
+        target_distances = offset_distance + np.arange(electrode.n_contacts) * (contact_length_mm + contact_gap_mm) + electrode.shift_fiducials_value * (contact_length_mm + contact_gap_mm)
 
         chosen_idx = []
         for t in target_distances:
+            if t < 0 or t > electrode.curve_cumulative_distances[-1]:
+                electrode.warn_out_of_range = True
+                continue
+
             # insertion point where cumulative >= t
-            idx = np.searchsorted(cumulative_distances, t)
+            idx = np.searchsorted(electrode.curve_cumulative_distances, t)
 
             # choose nearer of the two neighbors
-            below = cumulative_distances[idx - 1]
-            above = cumulative_distances[idx]
+            below = electrode.curve_cumulative_distances[idx - 1]
+            above = electrode.curve_cumulative_distances[idx]
             best = idx if abs(above - t) < abs(t - below) else idx - 1
 
             chosen_idx.append(best)
 
-        return points[chosen_idx]
+        return electrode.curve_points[chosen_idx]
 
     def create_spherical_mask(self,
                               spacing: np.array,
