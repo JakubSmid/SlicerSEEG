@@ -7,7 +7,7 @@
 - [ ] CT bone reconstruction
 - [x] auto load input based on input file name
 - [x] fiducial placement
-- [ ] use tip of the electrode instead of the linear approximation
+- [x] use tip of the electrode instead of the linear approximation
 - [ ] add micro step while electrode shifting
 - [x] new fiducial naming A-no, B-no
 - [x] disabled buttons tooltip hint
@@ -33,7 +33,7 @@
 
 # Testing
 - [x] prepare dataset
-- [ ] apply dummy affine transform
+- [ ] apply dummy affine transform to the T1
 - [ ] estimate bolt tip as extrapolation of the first and last contact and apply additional random translation away from the axis
 - [ ] evaluation script
 - [ ] batch loading (as a test function?)

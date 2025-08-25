@@ -132,7 +132,7 @@ class ContactDetectorParameterNode:
     gaussianBalls: bool
 
 class Electrode():
-    def __init__(self, bolt_tip_ras, label, contact_length_mm, contact_gap_mm):
+    def __init__(self, bolt_tip_ras, label, contact_length_mm, contact_gap_mm, tip_ras=None):
         self.bolt_tip_ras = np.array(bolt_tip_ras) # tip of the bolt in RAS
         self.label = label # full label, e.g., A-1, B-2, etc
         self.label_prefix, self.n_contacts = Electrode.split_label(label) # A, 1
@@ -140,6 +140,7 @@ class Electrode():
         
         self.bolt_segmentation_indices_ijk = None # indices of the bolt segmentation in IJK
 
+        self.tip_ras = tip_ras
         self.tip_ijk = None # tip of the electrode in IJK
         self.entry_point_ijk = None # entry point of the electrode in IJK
         self.gmm_segmentation_indices_ijk = None # indices of the electrode segmentation in IJK
@@ -153,8 +154,14 @@ class Electrode():
     
     @staticmethod
     def split_label(electrode_name):
-        split = electrode_name.split("-")
-        return split[0], int(split[1])
+        parts = electrode_name.split('-')
+        if len(parts) < 2:
+            slicer.util.errorDisplay(f"Electrode label {electrode_name} is not in the correct format. It should be in the format '<label>-<number>'.")
+            raise ValueError
+        if parts[-1].isdigit() == False:
+            slicer.util.errorDisplay(f"Electrode label {electrode_name} is not in the correct format. The part after '-' should be a number indicating the number of contacts.")
+            raise ValueError
+        return '-'.join(parts[:-1]), int(parts[-1])
 
 #
 # ContactDetectorWidget
@@ -349,7 +356,26 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         for i in range(self._parameterNode.boltFiducials.GetNumberOfControlPoints()):
             bolt_tip_ras = [0, 0, 0]
             self._parameterNode.boltFiducials.GetNthControlPointPosition(i, bolt_tip_ras)
-            self.electrodes.append(Electrode(bolt_tip_ras, self._parameterNode.boltFiducials.GetNthControlPointLabel(i), self._parameterNode.contactLength_mm, self._parameterNode.contactGap_mm))
+
+            # look for the tip of the electrode
+            label = self._parameterNode.boltFiducials.GetNthControlPointLabel(i)
+            prefix, n_contacts = Electrode.split_label(label)
+            if prefix[-1] == "1" and self._parameterNode.boltFiducials.GetControlPointIndexByLabel(f"{prefix[:-1]}-{n_contacts}") != -1:
+                # if this is the tip, check if there is a pair with entry point
+                continue
+
+            if self._parameterNode.boltFiducials.GetControlPointIndexByLabel(f"{prefix}1-{n_contacts}") != -1:
+                # if tip for this electrode exists
+                tip_ras = [0, 0, 0]
+                tip_index = self._parameterNode.boltFiducials.GetControlPointIndexByLabel(f"{prefix}1-{n_contacts}")
+                self._parameterNode.boltFiducials.GetNthControlPointPosition(tip_index, tip_ras)
+                self.electrodes.append(Electrode(bolt_tip_ras,
+                                                 self._parameterNode.boltFiducials.GetNthControlPointLabel(i),
+                                                 self._parameterNode.contactLength_mm,
+                                                 self._parameterNode.contactGap_mm,
+                                                 tip_ras))
+            else:
+                self.electrodes.append(Electrode(bolt_tip_ras, self._parameterNode.boltFiducials.GetNthControlPointLabel(i), self._parameterNode.contactLength_mm, self._parameterNode.contactGap_mm))
 
         # segment bolts
         with slicer.util.WaitCursor():
@@ -910,6 +936,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
             electrode.tip_ijk = electrode.entry_point_ijk + offset_ijk
 
+            # if tip fiducial is provided, adjust entry point accordingly
+            if electrode.tip_ras is not None:
+                electrode.tip_ijk = self.RAS_to_IJK(electrode.tip_ras, inputCT)[::-1]
+
             if add_line:
                 lineNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsLineNode")
                 lineNode.SetName(f"Electrode {electrode.label_prefix}")
@@ -971,7 +1001,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
             if not np.any(bolt_segmentation):
                 slicer.util.errorDisplay(f"Bolt segmentation for electrode {electrode.label_prefix} is empty. Try to check position of the bolt fiducial or consider increasing the sphere radius or decreasing the metal threshold.", windowTitle="Error")
-                raise ValueError(f"Bolt segmentation for electrode {electrode.label_prefix} is empty")
+                raise ValueError
 
             # find the largest connected component (full connectivity)
             labels = skimage.measure.label(bolt_segmentation)
