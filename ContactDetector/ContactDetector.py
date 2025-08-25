@@ -117,6 +117,7 @@ class ContactDetectorParameterNode:
     brainMask: vtkMRMLSegmentationNode
     boltFiducials: vtkMRMLMarkupsFiducialNode
 
+    saveBrainMask: bool = True
     metalThreshold_HU: Annotated[float, WithinRange(0, 9999999)] = 3000
     contactLength_mm: Annotated[float, WithinRange(0.1, 100)] = 2
     contactGap_mm: Annotated[float, WithinRange(0.1, 100)] = 1.5
@@ -210,6 +211,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         # Buttons
         self.ui.buttonDisplayCT.connect("clicked(bool)", self.onDisplayCTClicked)
+        self.ui.buttonCreateBrainMask.connect("clicked(bool)", self.onCreateBrainMaskClicked)
 
         self.ui.radioButtonRenderingMetal.connect("clicked(bool)", self.onRenderingMetalClicked)
         self.ui.radioButtonRenderingHead.connect("clicked(bool)", self.onRenderingHeadClicked)
@@ -395,18 +397,79 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.onRenderingDisabledClicked()
             self.ui.radioButtonRenderingDisabled.setChecked(True)
 
+            if self._parameterNode.saveBrainMask:
+                ct_path = self._parameterNode.inputCT.GetStorageNode().GetFullNameFromFileName()
+                self.ui.pathLineEditBrainMask.currentPath = os.path.join(os.path.dirname(ct_path), "BETmask.seg.nrrd")
+
     def onDisplayCTClicked(self):
         slicer.util.setSliceViewerLayers(background = self._parameterNode.inputCT)
         slicer.util.resetSliceViews()
 
+    def onCreateBrainMaskClicked(self):
+        # check HD-BET availability
+        em = slicer.app.extensionsManagerModel()
+        if not em.isExtensionInstalled("HDBrainExtraction"):
+            if not em.installExtensionFromServer("HDBrainExtraction"):
+                raise ValueError(f"Extension HDBrainExtraction is not installed")
+            
+        if not em.isExtensionEnabled("HDBrainExtraction"):
+            raise ValueError(f"Extension HDBrainExtraction is not loaded even though it is installed")
+
+        with slicer.util.WaitCursor():
+            # coregister T1 to CT
+            fixedVolumeNode = self._parameterNode.inputCT
+            movingVolumeNode = self._parameterNode.inputT1
+
+            # Create new nodes for output
+            segmentation = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+            segmentation.SetName(f"CT brain mask")
+            transformNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode")
+
+            # Run registration
+            parameters = {}
+            parameters["fixedVolume"] = fixedVolumeNode.GetID()
+            parameters["movingVolume"] = movingVolumeNode.GetID()
+            parameters["linearTransform"] = transformNode.GetID()
+            parameters["useRigid"] = True
+            parameters["initializeTransformMode"] = "useMomentsAlign"
+            parameters["samplingPercentage"] = 0.002
+            cliBrainsFitRigidNode = slicer.cli.run(slicer.modules.brainsfit, None, parameters, wait_for_completion=True)
+
+            # run HD-BET
+            import HDBrainExtractionTool as hd_bet
+            hd_bet_logic = hd_bet.HDBrainExtractionToolLogic()
+            hd_bet_logic.setupPythonRequirements()
+            hd_bet_logic.process(self._parameterNode.inputT1, None, segmentation, "cpu")
+            segmentation.SetAndObserveTransformNodeID(transformNode.GetID())
+            segmentation.HardenTransform()
+
+            # update parameter node
+            self._parameterNode.brainMask = segmentation
+
+            # save segmentation
+            if self._parameterNode.saveBrainMask:
+                slicer.util.saveNode(segmentation, self.ui.pathLineEditBrainMask.currentPath)
+
     def updateGUIFromParameterNode(self, caller, event):
-        # disable skull stripping button if T1 is not selected
+        # check skull stripping buttons availability
+        missing = []
+        if self._parameterNode.inputCT is None:
+            missing.append("CT")
         if self._parameterNode.inputT1 is None:
+            missing.append("T1")
+        if missing:
             self.ui.buttonCreateBrainMask.setEnabled(False)
-            self.ui.buttonCreateBrainMask.setToolTip("Missing T1 image")
+            self.ui.pathLineEditBrainMask.setEnabled(False)
+            self.ui.buttonCreateBrainMask.setToolTip(f"Missing input(s): {', '.join(missing)}")
+            self.ui.pathLineEditBrainMask.setToolTip(f"Missing input(s): {', '.join(missing)}")
+            self.ui.pathLineEditBrainMask.currentPath = ""
         else:
             self.ui.buttonCreateBrainMask.setEnabled(True)
+            self.ui.pathLineEditBrainMask.setEnabled(True)
             self.ui.buttonCreateBrainMask.setToolTip("")
+            self.ui.pathLineEditBrainMask.setToolTip("")
+            ct_path = self._parameterNode.inputCT.GetStorageNode().GetFullNameFromFileName()
+            self.ui.pathLineEditBrainMask.currentPath = os.path.join(os.path.dirname(ct_path), "BETmask.seg.nrrd")
 
         # disable rendering buttons and slice views if CT is not selected
         if self._parameterNode.inputCT is None:

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>441</width>
-    <height>1020</height>
+    <height>1277</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -236,57 +236,52 @@
      <property name="collapsed">
       <bool>true</bool>
      </property>
-     <layout class="QFormLayout" name="formLayout">
+     <layout class="QGridLayout" name="gridLayout_5">
       <item row="0" column="0">
+       <widget class="QCheckBox" name="checkBox">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Save CT brain mask:</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>saveBrainMask</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkPathLineEdit" name="pathLineEditBrainMask">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="filters">
+         <set>ctkPathLineEdit::Executable|ctkPathLineEdit::Files|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::PermissionMask|ctkPathLineEdit::Readable|ctkPathLineEdit::Writable</set>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
          <string>Metal threshold (HU):</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_6">
-        <property name="text">
-         <string>Contact length (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0">
-       <widget class="QLabel" name="label_7">
-        <property name="text">
-         <string>Sphere radius around the bolt (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_8">
-        <property name="text">
-         <string>Gap between contacts (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QLabel" name="label_9">
-        <property name="text">
-         <string>Electrode diameter (mm):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="5" column="0">
-       <widget class="QLabel" name="label_10">
-        <property name="text">
-         <string>Gaussian blob size (sigma):</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
+      <item row="1" column="1">
        <widget class="QDoubleSpinBox" name="doubleSpinBox">
         <property name="SlicerParameterName" stdset="0">
          <string>metalThreshold_HU</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_6">
+        <property name="text">
+         <string>Contact length (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
        <widget class="QDoubleSpinBox" name="doubleSpinBox_2">
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -296,7 +291,14 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_8">
+        <property name="text">
+         <string>Gap between contacts (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
        <widget class="QDoubleSpinBox" name="doubleSpinBox_3">
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -306,7 +308,14 @@
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_9">
+        <property name="text">
+         <string>Electrode diameter (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
        <widget class="QDoubleSpinBox" name="doubleSpinBox_4">
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -316,7 +325,14 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_7">
+        <property name="text">
+         <string>Sphere radius around the bolt (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
        <widget class="QDoubleSpinBox" name="doubleSpinBox_5">
         <property name="singleStep">
          <double>0.100000000000000</double>
@@ -326,7 +342,14 @@
         </property>
        </widget>
       </item>
-      <item row="5" column="1">
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>Gaussian blob size (sigma):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
        <widget class="QDoubleSpinBox" name="doubleSpinBox_6">
         <property name="SlicerParameterName" stdset="0">
          <string>blobSize_sigma</string>
@@ -370,6 +393,13 @@
       <item row="1" column="0">
        <widget class="QWidget" name="shiftFiducialsWidget" native="true">
         <layout class="QGridLayout" name="gridLayout_4">
+         <item row="0" column="0">
+          <widget class="QLabel" name="labelShiftElectrode">
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
          <item row="0" column="1">
           <widget class="QSpinBox" name="spinBoxShiftElectrode">
            <property name="minimum">
@@ -377,13 +407,6 @@
            </property>
            <property name="maximum">
             <number>2</number>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="0">
-          <widget class="QLabel" name="labelShiftElectrode">
-           <property name="text">
-            <string>TextLabel</string>
            </property>
           </widget>
          </item>
@@ -517,6 +540,11 @@
    <extends>QWidget</extends>
    <header>ctkCollapsibleButton.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkPathLineEdit</class>
+   <extends>QWidget</extends>
+   <header>ctkPathLineEdit.h</header>
   </customwidget>
   <customwidget>
    <class>qMRMLNodeComboBox</class>

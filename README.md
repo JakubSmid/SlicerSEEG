@@ -1,6 +1,6 @@
 # Features
-- [ ] add registration
-- [ ] skull stripping
+- [x] add registration
+- [x] skull stripping
 - [x] automatic installation of python packages
 - [X] contact manual shifting
 - [x] use cropped array around the balls for the correlation for faster computation
@@ -29,7 +29,6 @@
 - [x] remove step-by-step, add event on run all click
 - [ ] create tooltip help
 - [ ] add module description, help and acknowledgement
-- [ ] evaluate differences against GT
 - [ ] icon
 
 # Testing
