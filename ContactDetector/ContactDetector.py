@@ -133,23 +133,23 @@ class ContactDetectorParameterNode:
 
 class Electrode():
     def __init__(self, bolt_tip_ras, label, contact_length_mm, contact_gap_mm):
-        self.bolt_tip_ras = np.array(bolt_tip_ras)
-        self.label = label
-        self.label_prefix, self.n_contacts = Electrode.split_label(label)
-        self.length_mm = contact_length_mm * self.n_contacts + contact_gap_mm * (self.n_contacts - 1)
+        self.bolt_tip_ras = np.array(bolt_tip_ras) # tip of the bolt in RAS
+        self.label = label # full label, e.g., A-1, B-2, etc
+        self.label_prefix, self.n_contacts = Electrode.split_label(label) # A, 1
+        self.length_mm = contact_length_mm * self.n_contacts + contact_gap_mm * (self.n_contacts - 1) # length of the electrode in mm
         
-        self.bolt_segmentation_indices_ijk = None
+        self.bolt_segmentation_indices_ijk = None # indices of the bolt segmentation in IJK
 
-        self.tip_ijk = None
-        self.entry_point_ijk = None
-        self.gmm_segmentation_indices_ijk = None
+        self.tip_ijk = None # tip of the electrode in IJK
+        self.entry_point_ijk = None # entry point of the electrode in IJK
+        self.gmm_segmentation_indices_ijk = None # indices of the electrode segmentation in IJK
 
-        self.curve_points = None
-        self.curve_cumulative_distances = None
-        self.curve_points_offset = 0
-        self.shift_fiducials_value = 0
+        self.curve_points = None # fitted curve points in IJK
+        self.curve_cumulative_distances_mm = None # cumulative distances between curve points in mm
+        self.curve_points_offset = 0 # offset in number of points along the curve
+        self.shift_fiducials_value = 0 # shift value in number of contacts
 
-        self.warn_out_of_range = False
+        self.warn_out_of_range = False # flag to warn if the contact points are out of range of the CT or GMM
     
     @staticmethod
     def split_label(electrode_name):
@@ -712,9 +712,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             electrode.curve_points = electrode.curve_points[in_image]
 
             # compute distance between points on the curve
-            diffs = np.diff(electrode.curve_points * inputCT.GetSpacing()[::-1], axis=0)
-            curve_distances_between_points = np.linalg.norm(diffs, axis=1)
-            electrode.curve_cumulative_distances = np.cumsum(curve_distances_between_points)
+            diffs_mm = np.diff(electrode.curve_points * inputCT.GetSpacing()[::-1], axis=0)
+            curve_distances_between_points_mm = np.linalg.norm(diffs_mm, axis=1)
+            electrode.curve_cumulative_distances_mm = np.cumsum(curve_distances_between_points_mm)
 
             # get number of points between the first and the fifth contact
             if electrode.n_contacts > 4:
@@ -1007,21 +1007,21 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                               contact_length_mm: float,
                               contact_gap_mm: float,
                               offset: float) -> np.array:
-        offset_distance = electrode.curve_cumulative_distances[offset]
+        offset_distance = electrode.curve_cumulative_distances_mm[offset]
         target_distances = offset_distance + np.arange(electrode.n_contacts) * (contact_length_mm + contact_gap_mm) + electrode.shift_fiducials_value * (contact_length_mm + contact_gap_mm)
 
         chosen_idx = []
         for t in target_distances:
-            if t < 0 or t > electrode.curve_cumulative_distances[-1]:
+            if t < 0 or t > electrode.curve_cumulative_distances_mm[-1]:
                 electrode.warn_out_of_range = True
                 continue
 
             # insertion point where cumulative >= t
-            idx = np.searchsorted(electrode.curve_cumulative_distances, t)
+            idx = np.searchsorted(electrode.curve_cumulative_distances_mm, t)
 
             # choose nearer of the two neighbors
-            below = electrode.curve_cumulative_distances[idx - 1]
-            above = electrode.curve_cumulative_distances[idx]
+            below = electrode.curve_cumulative_distances_mm[idx - 1]
+            above = electrode.curve_cumulative_distances_mm[idx]
             best = idx if abs(above - t) < abs(t - below) else idx - 1
 
             chosen_idx.append(best)
