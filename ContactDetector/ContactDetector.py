@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Annotated, Optional
+import re
 
 import vtk
 
@@ -216,7 +217,8 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.comboBoxCT.connect('currentNodeChanged(vtkMRMLNode*)', self.onComboBoxCTChanged)
         self.ui.SimpleMarkupsWidgetEstimatedContacts.connect('currentMarkupsControlPointSelectionChanged(int)', self.onMarkupsWidgetEstimatedContactsSelectionChanged)
         self.ui.SimpleMarkupsWidgetEstimatedContacts.connect('markupsNodeChanged()', self.onMarkupsWidgetEstimatedContactsMarkupsNodeChanged)
-        self.ui.spinBoxShiftElectrode.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeChanged)
+        self.ui.spinBoxShiftElectrodeByContact.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeByContactChanged)
+        self.ui.spinBoxShiftElectrodeMicrostep.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeMicrostepChanged)
 
         # Buttons
         self.ui.buttonDisplayCT.connect("clicked(bool)", self.onDisplayCTClicked)
@@ -259,7 +261,27 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         progressbar.labelText = "Done..."
         progressbar.value = 100
 
-    def onSpinBoxShiftElectrodeChanged(self, spin_box_value):
+    def onSpinBoxShiftElectrodeMicrostepChanged(self, spin_box_value):
+        fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
+        self.selected_electrode.curve_points_offset = spin_box_value
+
+        selected_points = self.logic.select_contact_points(self.selected_electrode,
+                                                           self._parameterNode.contactLength_mm,
+                                                           self._parameterNode.contactGap_mm,
+                                                           self.selected_electrode.curve_points_offset)
+        if self.selected_electrode.warn_out_of_range:
+            slicer.util.warningDisplay(f"Could not fit all contact points on electrode {self.selected_electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
+            self.selected_electrode.warn_out_of_range = False
+
+        # pause rendering while changing fiducial positions
+        with slicer.util.RenderBlocker():
+            # convert to RAS
+            for i, point in enumerate(selected_points):
+                point = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
+                fiducial_idx = fiducial_node.GetControlPointIndexByLabel(f"{self.selected_electrode.label_prefix}{i+1}")
+                fiducial_node.SetNthControlPointPosition(fiducial_idx, point)
+
+    def onSpinBoxShiftElectrodeByContactChanged(self, spin_box_value):
         fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         self.selected_electrode.shift_fiducials_value = spin_box_value
 
@@ -271,19 +293,14 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.selected_electrode.warn_out_of_range:
             slicer.util.warningDisplay(f"Could not fit all contact points on electrode {self.selected_electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
             self.selected_electrode.warn_out_of_range = False
-            
-        # get fiducials list
-        fiducial_idx = []
-        for i in range(fiducial_node.GetNumberOfControlPoints()):
-            if fiducial_node.GetNthControlPointLabel(i).startswith(self.selected_electrode.label_prefix):
-                fiducial_idx.append(i)
 
         # pause rendering while changing fiducial positions
         with slicer.util.RenderBlocker():
             # convert to RAS
             for i, point in enumerate(selected_points):
-                    selected_points[i] = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
-                    fiducial_node.SetNthControlPointPosition(fiducial_idx[i], selected_points[i])
+                point = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
+                fiducial_idx = fiducial_node.GetControlPointIndexByLabel(f"{self.selected_electrode.label_prefix}{i+1}")
+                fiducial_node.SetNthControlPointPosition(fiducial_idx, point)
 
             # jump slices to updated fiducials
             # slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(fiducial_node.GetID(), self.selected_markup_index, True)
@@ -292,17 +309,24 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onMarkupsWidgetEstimatedContactsSelectionChanged(self, markupIndex):
         fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         selected_label = fiducial_node.GetNthControlPointLabel(markupIndex)
+        selected_label = re.sub(r"\d+$", "", selected_label) # remove trailing number
         self.selected_markup_index = markupIndex
 
         # find electrode by name
         for electrode in self.electrodes:
-            if selected_label.startswith(electrode.label_prefix):
+            if electrode.label_prefix == selected_label:
                 self.selected_electrode = electrode
-                self.ui.labelShiftElectrode.setText(f"Shift {electrode.label_prefix} fiducials:")
+                self.ui.labelShiftElectrodeByContact.setText(f"Shift {electrode.label_prefix} fiducials by contact:")
+                self.ui.labelShiftElectrodeMicrostep.setText(f"Shift {electrode.label_prefix} fiducials (microsteps, approx. 0.1 mm):")
 
-                self.ui.spinBoxShiftElectrode.disconnect('valueChanged(int)')
-                self.ui.spinBoxShiftElectrode.setValue(electrode.shift_fiducials_value)
-                self.ui.spinBoxShiftElectrode.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeChanged)
+                self.ui.spinBoxShiftElectrodeMicrostep.maximum = len(electrode.curve_cumulative_distances_mm) - 1
+
+                self.ui.spinBoxShiftElectrodeByContact.disconnect('valueChanged(int)')
+                self.ui.spinBoxShiftElectrodeMicrostep.disconnect('valueChanged(int)')
+                self.ui.spinBoxShiftElectrodeByContact.setValue(electrode.shift_fiducials_value)
+                self.ui.spinBoxShiftElectrodeMicrostep.setValue(electrode.curve_points_offset)
+                self.ui.spinBoxShiftElectrodeByContact.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeByContactChanged)
+                self.ui.spinBoxShiftElectrodeMicrostep.connect('valueChanged(int)', self.onSpinBoxShiftElectrodeMicrostepChanged)
                 break
 
     def onMarkupsWidgetEstimatedContactsMarkupsNodeChanged(self):
@@ -817,8 +841,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
             # plot selected points
             for i, point in enumerate(points_best_fit):
-                points_best_fit[i] = self.IJK_to_RAS(point[::-1], inputCT)
-                markupsNode.AddControlPoint(points_best_fit[i], f"{electrode.label_prefix}{i+1}")
+                point = self.IJK_to_RAS(point[::-1], inputCT)
+                markupsNode.AddControlPoint(point, f"{electrode.label_prefix}{i+1}")
 
         return markupsNode
 
@@ -880,9 +904,9 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             segmentationNode.CreateDefaultDisplayNodes()
        
         # assign gmm labels
-        for i, electrode in enumerate(electrodes):
+        for idx, electrode in enumerate(electrodes):
             slicer.app.processEvents()
-            electrode.gmm_segmentation_indices_ijk = points[labels == i]
+            electrode.gmm_segmentation_indices_ijk = points[labels == idx]
             
             if add_segmentation:
                 # prepare array with electrode segmentation

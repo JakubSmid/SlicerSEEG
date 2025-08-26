@@ -394,14 +394,14 @@
        <widget class="QWidget" name="shiftFiducialsWidget" native="true">
         <layout class="QGridLayout" name="gridLayout_4">
          <item row="0" column="0">
-          <widget class="QLabel" name="labelShiftElectrode">
+          <widget class="QLabel" name="labelShiftElectrodeByContact">
            <property name="text">
             <string>TextLabel</string>
            </property>
           </widget>
          </item>
          <item row="0" column="1">
-          <widget class="QSpinBox" name="spinBoxShiftElectrode">
+          <widget class="QSpinBox" name="spinBoxShiftElectrodeByContact">
            <property name="minimum">
             <number>-2</number>
            </property>
@@ -412,6 +412,35 @@
          </item>
          <item row="0" column="2">
           <spacer name="horizontalSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="labelShiftElectrodeMicrostep">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="text">
+            <string>TextLabel</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QSpinBox" name="spinBoxShiftElectrodeMicrostep"/>
+         </item>
+         <item row="1" column="2">
+          <spacer name="horizontalSpacer_2">
            <property name="orientation">
             <enum>Qt::Horizontal</enum>
            </property>
