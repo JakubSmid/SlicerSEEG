@@ -262,34 +262,25 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         progressbar.value = 100
 
     def onSpinBoxShiftElectrodeMicrostepChanged(self, spin_box_value):
-        fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         self.selected_electrode.curve_points_offset = spin_box_value
-
         selected_points = self.logic.select_contact_points(self.selected_electrode,
                                                            self._parameterNode.contactLength_mm,
                                                            self._parameterNode.contactGap_mm,
                                                            self.selected_electrode.curve_points_offset)
-        if self.selected_electrode.warn_out_of_range:
-            slicer.util.warningDisplay(f"Could not fit all contact points on electrode {self.selected_electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
-            self.selected_electrode.warn_out_of_range = False
 
-        # pause rendering while changing fiducial positions
-        with slicer.util.RenderBlocker():
-            # convert to RAS
-            for i, point in enumerate(selected_points):
-                point = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
-                fiducial_idx = fiducial_node.GetControlPointIndexByLabel(f"{self.selected_electrode.label_prefix}{i+1}")
-                fiducial_node.SetNthControlPointPosition(fiducial_idx, point)
+        self.updateFiducialLabels(selected_points)
 
     def onSpinBoxShiftElectrodeByContactChanged(self, spin_box_value):
-        fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         self.selected_electrode.shift_fiducials_value = spin_box_value
-
         selected_points = self.logic.select_contact_points(self.selected_electrode,
                                                            self._parameterNode.contactLength_mm,
                                                            self._parameterNode.contactGap_mm,
                                                            self.selected_electrode.curve_points_offset)
         
+        self.updateFiducialLabels(selected_points)
+
+    def updateFiducialLabels(self, selected_points):
+        fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         if self.selected_electrode.warn_out_of_range:
             slicer.util.warningDisplay(f"Could not fit all contact points on electrode {self.selected_electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
             self.selected_electrode.warn_out_of_range = False
@@ -298,13 +289,15 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         with slicer.util.RenderBlocker():
             # convert to RAS
             for i, point in enumerate(selected_points):
-                point = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
                 fiducial_idx = fiducial_node.GetControlPointIndexByLabel(f"{self.selected_electrode.label_prefix}{i+1}")
+                if fiducial_idx == -1:
+                    slicer.util.warningDisplay(f"Could not find fiducial {self.selected_electrode.label_prefix}{i+1}.", windowTitle="Warning")
+                    continue
+                point = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
                 fiducial_node.SetNthControlPointPosition(fiducial_idx, point)
 
             # jump slices to updated fiducials
             # slicer.modules.markups.logic().JumpSlicesToNthPointInMarkup(fiducial_node.GetID(), self.selected_markup_index, True)
-
 
     def onMarkupsWidgetEstimatedContactsSelectionChanged(self, markupIndex):
         fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
