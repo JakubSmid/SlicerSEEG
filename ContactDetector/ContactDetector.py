@@ -364,6 +364,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def onBoltAxisEstClicked(self):
         with slicer.util.WaitCursor():
             self.logic.bolt_axis_estimation(self._parameterNode.inputCT,
+                                            self._parameterNode.brainMask,
                                             self.electrodes,
                                             self._parameterNode.linearApproximation)
 
@@ -737,7 +738,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             coeffs_z = np.polyfit(s, electrode.gmm_segmentation_indices_ijk[:, 2], 5, w=intensities)
 
             # extend projection of the points
-            extend_mm = 2*(contact_length_mm + contact_gap_mm)
+            extend_mm = 2*(contact_length_mm + contact_gap_mm) # prolong the projection by two contact lengths
             extend_ijk = extend_mm / np.linalg.norm(pca_v_ijk * inputCT.GetSpacing()[::-1])
 
             # electrode.length_mm + backwards_mm + sphere around the bolt / 0.1 mm resolution
@@ -758,14 +759,10 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             diffs_mm = np.diff(electrode.curve_points * inputCT.GetSpacing()[::-1], axis=0)
             curve_distances_between_points_mm = np.linalg.norm(diffs_mm, axis=1)
             electrode.curve_cumulative_distances_mm = np.cumsum(curve_distances_between_points_mm)
-
-            # get number of points between the first and the fifth contact
-            if electrode.n_contacts > 4:
-                selected_points = self.select_contact_points(electrode, contact_length_mm, contact_gap_mm, 0)
-                fifth_contact_point = selected_points[4]
-                n = np.where(electrode.curve_points == fifth_contact_point)[0][0]
-            else:
-                n = len(electrode.curve_points)-1
+            
+            # get number of points to fit
+            n = np.ceil(4*(contact_length_mm + contact_gap_mm) / 0.1).astype(int)
+            n = len(electrode.curve_points)-1 if n > len(electrode.curve_points)-1 else n
 
             best_fit = -np.inf
             best_gaussian = None
@@ -913,6 +910,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
 
     def bolt_axis_estimation(self,
                              inputCT: vtkMRMLScalarVolumeNode,
+                             brainMask: vtkMRMLSegmentationNode,
                              electrodes: list[Electrode],
                              add_line: bool) -> None:
         # import or install dependencies
@@ -922,9 +920,6 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             if slicer.util.confirmOkCancelDisplay("This module requires 'scikit-learn' Python package. Click OK to install it now."):
                 slicer.util.pip_install("scikit-learn")
                 from sklearn.decomposition import PCA
-
-        # prepare data array
-        ct_array = slicer.util.arrayFromVolume(inputCT)
 
         for electrode in electrodes:
             slicer.app.processEvents()
@@ -936,8 +931,8 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
             pca_centroid_ijk = pca.mean_
 
             # check pca_v_ijk direction is pointing inside the skull
-            ct_image_center_ijk = np.array(ct_array.shape) / 2
-            vector_to_center = ct_image_center_ijk - pca_centroid_ijk
+            brain_center_ijk = brainMask.GetSegmentCenter(brainMask.GetSegmentation().GetSegmentIDs()[0])
+            vector_to_center = brain_center_ijk - pca_centroid_ijk
             if np.dot(vector_to_center, pca_v_ijk) < 0:
                 pca_v_ijk = -pca_v_ijk
 

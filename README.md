@@ -23,8 +23,8 @@
 - [x] fix memory leakage after deleting nodes from slicer
 - [x] warning if there is no bolt around the input fiducial
 - [x] fix error when extending the curve outside of the image / moving the electrode outside of the image
-- [x] critical error when shifting contacts after renaming estimated contacts (observe renaming of the control points and disable shifting widget on rename??)
-- [ ] cannot make window smaller due to the minimum size of the widgets
+- [x] critical error when shifting contacts after renaming estimated contacts
+- [ ] cannot make window smaller due to the minimum size of the widgets => make Inputs buttons in vertical layout?
 
 # Finalization
 - [x] add parameters into the parameter node and check scene saving
@@ -41,4 +41,4 @@
 - [ ] batch loading (as a test function?)
 
 # Known issues
-- [ ] while fitting the electrode with less than 5 contacts, out of range warning is raised
+- [x] while fitting the electrode with less than 5 contacts, out of range warning is raised
