@@ -464,51 +464,10 @@
       <string>Debug (developerMode)</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_2" columnstretch="1,0">
-      <item row="1" column="0">
-       <widget class="QPushButton" name="buttonBoltAxisEst">
-        <property name="text">
-         <string>Bolt axis estimation</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QCheckBox" name="checkBoxLinearApproximation">
-        <property name="text">
-         <string>Show linear approximation</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string>linearApproximation</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="QCheckBox" name="checkBoxElectrodeSegmentation">
-        <property name="text">
-         <string>Show electrode segmentation</string>
-        </property>
-        <property name="SlicerParameterName" stdset="0">
-         <string>electrodeSegmentation</string>
-        </property>
-       </widget>
-      </item>
       <item row="0" column="0">
        <widget class="QPushButton" name="buttonBoltSegmentation">
         <property name="text">
          <string>Bolt segmentation</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QPushButton" name="buttonElectrodeSegmentation">
-        <property name="text">
-         <string>Electrode segmentation (GMM)</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QPushButton" name="buttonCurveFitting">
-        <property name="text">
-         <string>Curve fitting</string>
         </property>
        </widget>
       </item>
@@ -529,6 +488,61 @@
         </property>
         <property name="SlicerParameterName" stdset="0">
          <string>gaussianBalls</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QPushButton" name="buttonElectrodeSegmentation">
+        <property name="text">
+         <string>Electrode segmentation (GMM)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QPushButton" name="buttonBoltAxisEst">
+        <property name="text">
+         <string>Bolt axis estimation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QCheckBox" name="checkBoxElectrodeSegmentation">
+        <property name="text">
+         <string>Show electrode segmentation</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>electrodeSegmentation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QPushButton" name="buttonCurveFitting">
+        <property name="text">
+         <string>Curve fitting</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QCheckBox" name="checkBoxLinearApproximation">
+        <property name="text">
+         <string>Show linear approximation</string>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>linearApproximation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QPushButton" name="buttonBulkProcessing">
+        <property name="text">
+         <string>Bulk processing</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="ctkPathLineEdit" name="pathLineEditBulkProcessing">
+        <property name="filters">
+         <set>ctkPathLineEdit::Dirs|ctkPathLineEdit::Executable|ctkPathLineEdit::NoDot|ctkPathLineEdit::NoDotDot|ctkPathLineEdit::Readable</set>
         </property>
        </widget>
       </item>

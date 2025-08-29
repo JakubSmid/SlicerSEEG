@@ -25,6 +25,7 @@
 - [x] fix error when extending the curve outside of the image / moving the electrode outside of the image
 - [x] critical error when shifting contacts after renaming estimated contacts
 - [ ] cannot make window smaller due to the minimum size of the widgets => make Inputs buttons in vertical layout?
+- [ ] change estimation of the electrode axis orientation
 
 # Finalization
 - [x] add parameters into the parameter node and check scene saving
@@ -35,10 +36,10 @@
 
 # Testing
 - [x] prepare dataset
-- [ ] apply dummy affine transform to the T1
-- [ ] estimate bolt tip as extrapolation of the first and last contact and apply additional random translation away from the axis
+- [x] apply dummy affine transform to the T1
+- [x] estimate bolt tip as extrapolation of the first and last contact and apply additional random translation away from the axis
 - [ ] evaluation script
-- [ ] batch loading (as a test function?)
+- [x] batch loading (as a test function?)
 
 # Known issues
 - [x] while fitting the electrode with less than 5 contacts, out of range warning is raised

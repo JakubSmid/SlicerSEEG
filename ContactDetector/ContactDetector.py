@@ -235,9 +235,49 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.buttonBoltAxisEst.connect("clicked(bool)", self.onBoltAxisEstClicked)
         self.ui.buttonElectrodeSegmentation.connect("clicked(bool)", self.onElectrodeSegmentationClicked)
         self.ui.buttonCurveFitting.connect("clicked(bool)", self.onCurveFittingClicked)
+        self.ui.buttonBulkProcessing.connect("clicked(bool)", self.onBulkProcessingClicked)
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
+
+    def onBulkProcessingClicked(self):
+        input_dir = self.ui.pathLineEditBulkProcessing.currentPath
+        for root, dirs, files in os.walk(input_dir):
+            ct_path = None
+            t1_path = None
+            fcsv_path = None
+
+            for file in files:
+                if "CT" in file and file.endswith((".nii", ".nii.gz")):
+                    ct_path = file
+                elif "T1" in file and file.startswith("rand_affine_") and file.endswith((".nii", ".nii.gz")):
+                    t1_path = file
+                elif file == "BoltFiducials.fcsv":
+                    fcsv_path = file
+            if ct_path and t1_path and fcsv_path:
+                print(f"Processing: {root}")
+
+                # load images
+                ct = slicer.util.loadVolume(os.path.join(root, ct_path))
+                t1 = slicer.util.loadVolume(os.path.join(root, t1_path))
+                fiducials = slicer.util.loadMarkups(os.path.join(root, fcsv_path))
+
+                # run contact detector
+                self.onCreateBrainMaskClicked()
+                self.onRunClicked()
+
+                # save results
+                estimated_contacts = slicer.util.getNode("Electrodes")
+                slicer.util.saveNode(estimated_contacts, os.path.join(root, "EstimatedContacts.json"))
+
+                # cleanup
+                slicer.mrmlScene.RemoveNode(slicer.util.getNode("CT brain mask"))
+                slicer.mrmlScene.RemoveNode(slicer.util.getNode("Transform"))
+                slicer.mrmlScene.RemoveNode(estimated_contacts)
+                slicer.mrmlScene.RemoveNode(ct)
+                slicer.mrmlScene.RemoveNode(t1)
+                slicer.mrmlScene.RemoveNode(fiducials)
+                break
 
     def onRunClicked(self):
         progressbar = slicer.util.createProgressDialog(windowTitle="Detecting contacts")
@@ -282,7 +322,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def updateFiducialLabels(self, selected_points):
         fiducial_node = self.ui.SimpleMarkupsWidgetEstimatedContacts.currentNode()
         if self.selected_electrode.warn_out_of_range:
-            slicer.util.warningDisplay(f"Could not fit all contact points on electrode {self.selected_electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
+            print(f"{self.selected_electrode.label_prefix}: could not fit all contact points on electrode")
             self.selected_electrode.warn_out_of_range = False
 
         # pause rendering while changing fiducial positions
@@ -291,7 +331,7 @@ class ContactDetectorWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             for i, point in enumerate(selected_points):
                 fiducial_idx = fiducial_node.GetControlPointIndexByLabel(f"{self.selected_electrode.label_prefix}{i+1}")
                 if fiducial_idx == -1:
-                    slicer.util.warningDisplay(f"Could not find fiducial {self.selected_electrode.label_prefix}{i+1}.", windowTitle="Warning")
+                    print(f"{self.selected_electrode.label_prefix}: could not find fiducial {i+1}")
                     continue
                 point = self.logic.IJK_to_RAS(point[::-1], self._parameterNode.inputCT)
                 fiducial_node.SetNthControlPointPosition(fiducial_idx, point)
@@ -822,7 +862,7 @@ class ContactDetectorLogic(ScriptedLoadableModuleLogic):
                     best_gaussian = gaussian_balls_volume
 
             if electrode.warn_out_of_range:
-                slicer.util.warningDisplay(f"Could not fit all contact points on electrode {electrode.label_prefix}, contact points may be out of range of CT.", windowTitle="Warning")
+                print(f"{electrode.label_prefix}: could not fit all contact points on electrode")
                 electrode.warn_out_of_range = False
 
             if show_gaussian_balls:
